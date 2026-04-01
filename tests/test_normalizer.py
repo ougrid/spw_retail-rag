@@ -26,7 +26,10 @@ def test_cluster_names_groups_known_variants_by_text_similarity():
         similarity_threshold=0.75,
     )
 
-    grouped = {suggestion.canonical_name: set(suggestion.variants) for suggestion in suggestions}
+    grouped = {
+        suggestion.canonical_name: set(suggestion.variants)
+        for suggestion in suggestions
+    }
 
     assert {"Icon Siam", "icon-siam", "ICONSIAM"} in grouped.values()
     assert {"Siam Center", "Siam-Center"} in grouped.values()
@@ -43,12 +46,18 @@ def test_cluster_names_supports_embedding_similarity_override():
     )
 
     assert suggestions == [
-        ClusterSuggestion(canonical_name="Alpha Plaza", variants=("Alpha Plaza", "Beta Plaza"))
+        ClusterSuggestion(
+            canonical_name="Alpha Plaza", variants=("Alpha Plaza", "Beta Plaza")
+        )
     ]
 
 
 def test_review_clusters_uses_external_reviewer_when_available():
-    clusters = [ClusterSuggestion(canonical_name="Icon Siam", variants=("ICONSIAM", "Icon Siam", "icon-siam"))]
+    clusters = [
+        ClusterSuggestion(
+            canonical_name="Icon Siam", variants=("ICONSIAM", "Icon Siam", "icon-siam")
+        )
+    ]
 
     reviewed = review_clusters(clusters, reviewer=StubReviewer())
 
@@ -80,7 +89,11 @@ def test_apply_name_mappings_updates_dataframe_values():
 
     normalized_df = apply_name_mappings(df, mappings)
 
-    assert normalized_df["mall_name"].tolist() == ["ICONSIAM", "Siam Center", "Siam Paragon"]
+    assert normalized_df["mall_name"].tolist() == [
+        "ICONSIAM",
+        "Siam Center",
+        "Siam Paragon",
+    ]
 
 
 def test_detect_unknown_names_returns_unmapped_values():
@@ -89,6 +102,8 @@ def test_detect_unknown_names_returns_unmapped_values():
         "ICONSIAM": "ICONSIAM",
     }
 
-    unknown = detect_unknown_names(["Icon Siam", "Siam-Center", "ICONSIAM", "Siam Paragon"], mappings)
+    unknown = detect_unknown_names(
+        ["Icon Siam", "Siam-Center", "ICONSIAM", "Siam Paragon"], mappings
+    )
 
     assert unknown == ["Siam Paragon", "Siam-Center"]

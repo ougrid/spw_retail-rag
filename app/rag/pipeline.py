@@ -45,7 +45,9 @@ class RAGPipeline:
         self._top_k = top_k
         self._score_threshold = score_threshold
 
-    def answer(self, query: str, metadata_filters: dict[str, str] | None = None) -> RAGResponse:
+    def answer(
+        self, query: str, metadata_filters: dict[str, str] | None = None
+    ) -> RAGResponse:
         input_result = self._input_guard.evaluate(query)
         if not input_result.allowed:
             return self._blocked_response(input_result)
@@ -70,7 +72,9 @@ class RAGPipeline:
         messages = build_messages(query, sources)
         raw_answer = self._llm_client.generate(messages)
         output_result = self._output_guard.evaluate(raw_answer, sources)
-        final_answer = raw_answer if output_result.grounding_verified else FALLBACK_ANSWER
+        final_answer = (
+            raw_answer if output_result.grounding_verified else FALLBACK_ANSWER
+        )
 
         response = self._response(
             answer=final_answer,

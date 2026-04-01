@@ -30,19 +30,22 @@ def chat_with_api(message: str, history: list[dict[str, str]], api_base_url: str
     )
     response.raise_for_status()
     payload = response.json()
-    sources_markdown = "\n\n".join(
-        [
-            (
-                f"### {source.get('shop_name', 'Unknown')}\n"
-                f"- Mall: {source.get('mall_name', 'Unknown')}\n"
-                f"- Floor: {source.get('floor', 'Unknown')}\n"
-                f"- Category: {source.get('category', 'Unknown')}\n"
-                f"- Score: {source.get('relevance_score', 0):.2f}\n"
-                f"- Chunk: {source.get('chunk_text', '')}"
-            )
-            for source in payload.get("sources", [])
-        ]
-    ) or "No sources returned."
+    sources_markdown = (
+        "\n\n".join(
+            [
+                (
+                    f"### {source.get('shop_name', 'Unknown')}\n"
+                    f"- Mall: {source.get('mall_name', 'Unknown')}\n"
+                    f"- Floor: {source.get('floor', 'Unknown')}\n"
+                    f"- Category: {source.get('category', 'Unknown')}\n"
+                    f"- Score: {source.get('relevance_score', 0):.2f}\n"
+                    f"- Chunk: {source.get('chunk_text', '')}"
+                )
+                for source in payload.get("sources", [])
+            ]
+        )
+        or "No sources returned."
+    )
 
     history = history + [
         {"role": "user", "content": message},
@@ -81,7 +84,11 @@ def apply_approved_suggestions(suggestions_df: pd.DataFrame) -> str:
         if not bool(row.get("approved", False)):
             continue
         canonical = str(row.get("canonical_name", "")).strip()
-        variants = [variant.strip() for variant in str(row.get("variants", "")).split(",") if variant.strip()]
+        variants = [
+            variant.strip()
+            for variant in str(row.get("variants", "")).split(",")
+            if variant.strip()
+        ]
         if canonical and variants:
             canonical_to_variants[canonical] = variants
 
@@ -129,8 +136,14 @@ with gr.Blocks(title="Retail RAG Assistant") as demo:
         current_mappings = gr.Code(label="Current Mappings", language="json")
         refresh_button = gr.Button("Refresh Current Mappings")
 
-        generate_button.click(generate_normalization_suggestions, outputs=[suggestions_table])
-        apply_button.click(apply_approved_suggestions, inputs=[suggestions_table], outputs=[apply_status])
+        generate_button.click(
+            generate_normalization_suggestions, outputs=[suggestions_table]
+        )
+        apply_button.click(
+            apply_approved_suggestions,
+            inputs=[suggestions_table],
+            outputs=[apply_status],
+        )
         refresh_button.click(load_current_mappings, outputs=[current_mappings])
 
 

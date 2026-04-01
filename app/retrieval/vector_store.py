@@ -44,12 +44,16 @@ class QdrantVectorStore:
         """Create the collection if it does not already exist."""
         existing = self.client.collection_exists(self.collection_name)
         if existing:
-            logger.info("qdrant_collection_exists", collection_name=self.collection_name)
+            logger.info(
+                "qdrant_collection_exists", collection_name=self.collection_name
+            )
             return
 
         self.client.create_collection(
             collection_name=self.collection_name,
-            vectors_config=models.VectorParams(size=self.dimensions, distance=models.Distance.COSINE),
+            vectors_config=models.VectorParams(
+                size=self.dimensions, distance=models.Distance.COSINE
+            ),
         )
         logger.info("qdrant_collection_created", collection_name=self.collection_name)
 
@@ -59,11 +63,15 @@ class QdrantVectorStore:
             self.client.delete_collection(collection_name=self.collection_name)
         self.client.create_collection(
             collection_name=self.collection_name,
-            vectors_config=models.VectorParams(size=self.dimensions, distance=models.Distance.COSINE),
+            vectors_config=models.VectorParams(
+                size=self.dimensions, distance=models.Distance.COSINE
+            ),
         )
         logger.info("qdrant_collection_recreated", collection_name=self.collection_name)
 
-    def upsert_documents(self, documents: list[ChunkDocument], embeddings: list[list[float]]) -> None:
+    def upsert_documents(
+        self, documents: list[ChunkDocument], embeddings: list[list[float]]
+    ) -> None:
         """Upsert chunk documents and embeddings into Qdrant."""
         if len(documents) != len(embeddings):
             raise ValueError("Document and embedding counts must match")
@@ -83,7 +91,11 @@ class QdrantVectorStore:
             )
 
         self.client.upsert(collection_name=self.collection_name, points=points)
-        logger.info("qdrant_documents_upserted", collection_name=self.collection_name, count=len(points))
+        logger.info(
+            "qdrant_documents_upserted",
+            collection_name=self.collection_name,
+            count=len(points),
+        )
 
     def search(
         self,
@@ -107,11 +119,19 @@ class QdrantVectorStore:
                 chunk_id=item.payload["chunk_id"],
                 text=item.payload["text"],
                 score=item.score,
-                metadata={key: value for key, value in item.payload.items() if key not in {"chunk_id", "text"}},
+                metadata={
+                    key: value
+                    for key, value in item.payload.items()
+                    if key not in {"chunk_id", "text"}
+                },
             )
             for item in response
         ]
-        logger.info("qdrant_search_completed", collection_name=self.collection_name, result_count=len(results))
+        logger.info(
+            "qdrant_search_completed",
+            collection_name=self.collection_name,
+            result_count=len(results),
+        )
         return results
 
     def health_check(self) -> bool:
@@ -119,7 +139,9 @@ class QdrantVectorStore:
         try:
             self.client.get_collections()
         except Exception:
-            logger.exception("qdrant_health_check_failed", collection_name=self.collection_name)
+            logger.exception(
+                "qdrant_health_check_failed", collection_name=self.collection_name
+            )
             return False
         logger.info("qdrant_health_check_passed", collection_name=self.collection_name)
         return True

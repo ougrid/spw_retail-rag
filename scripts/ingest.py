@@ -41,7 +41,9 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def build_normalized_dataframe(auto_mode: bool) -> tuple[object, dict[str, str], list[str]]:
+def build_normalized_dataframe(
+    auto_mode: bool,
+) -> tuple[object, dict[str, str], list[str]]:
     settings = get_settings()
     raw_df = load_csv(settings.data_csv_path)
     cleaned_df = clean_shop_data(raw_df)
@@ -85,7 +87,9 @@ def main() -> None:
     args = parse_args()
     settings = get_settings()
 
-    normalized_df, mappings, unknown_names = build_normalized_dataframe(auto_mode=args.auto)
+    normalized_df, mappings, unknown_names = build_normalized_dataframe(
+        auto_mode=args.auto
+    )
     documents = chunk_shop_records(
         normalized_df,
         ChunkConfig(

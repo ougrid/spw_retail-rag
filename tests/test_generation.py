@@ -44,7 +44,9 @@ def test_build_messages_includes_system_prompt_and_query_context():
 def test_llm_client_returns_completion_text():
     stub_client = MagicMock()
     stub_client.chat.completions.create.return_value = SimpleNamespace(
-        choices=[SimpleNamespace(message=SimpleNamespace(content="Nike is on floor 1."))]
+        choices=[
+            SimpleNamespace(message=SimpleNamespace(content="Nike is on floor 1."))
+        ]
     )
 
     client = LLMClient.__new__(LLMClient)

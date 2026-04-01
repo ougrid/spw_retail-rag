@@ -26,21 +26,31 @@ class OutputGuardResult:
 class OutputGuard:
     """Validate that generated answers stay grounded in retrieved source data."""
 
-    def evaluate(self, answer: str, sources: Iterable[SearchResult]) -> OutputGuardResult:
+    def evaluate(
+        self, answer: str, sources: Iterable[SearchResult]
+    ) -> OutputGuardResult:
         source_list = list(sources)
         if not source_list:
-            return OutputGuardResult(False, "low", "No retrieved sources were provided.")
+            return OutputGuardResult(
+                False, "low", "No retrieved sources were provided."
+            )
 
         grounded = self._is_grounded(answer, source_list)
         confidence = self._confidence_from_scores(source_list)
-        reason = "ok" if grounded else "Answer contains facts not found in retrieved sources."
+        reason = (
+            "ok"
+            if grounded
+            else "Answer contains facts not found in retrieved sources."
+        )
         logger.info(
             "output_guard_evaluated",
             grounded=grounded,
             confidence=confidence,
             source_count=len(source_list),
         )
-        return OutputGuardResult(grounding_verified=grounded, confidence=confidence, reason=reason)
+        return OutputGuardResult(
+            grounding_verified=grounded, confidence=confidence, reason=reason
+        )
 
     def _is_grounded(self, answer: str, sources: list[SearchResult]) -> bool:
         answer_lower = answer.lower()
@@ -56,19 +66,33 @@ class OutputGuard:
         floor_values = FLOOR_PATTERN.findall(answer)
 
         for time_value in time_values:
-            if time_value.lower() not in combined_text and time_value.lower() not in known_values:
+            if (
+                time_value.lower() not in combined_text
+                and time_value.lower() not in known_values
+            ):
                 return False
 
         for floor_value in floor_values:
-            if floor_value.lower() not in known_values and floor_value.lower() not in combined_text:
+            if (
+                floor_value.lower() not in known_values
+                and floor_value.lower() not in combined_text
+            ):
                 return False
 
         for source in sources:
             shop_name = str(source.metadata.get("shop_name", "")).lower()
             mall_name = str(source.metadata.get("mall_name", "")).lower()
-            if shop_name and shop_name in answer_lower and shop_name not in combined_text:
+            if (
+                shop_name
+                and shop_name in answer_lower
+                and shop_name not in combined_text
+            ):
                 return False
-            if mall_name and mall_name in answer_lower and mall_name not in combined_text:
+            if (
+                mall_name
+                and mall_name in answer_lower
+                and mall_name not in combined_text
+            ):
                 return False
 
         return True

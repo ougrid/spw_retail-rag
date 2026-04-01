@@ -96,7 +96,9 @@ def test_search_returns_normalized_results():
     ]
     store = QdrantVectorStore("localhost", 6333, "mall_shops", 2, client=mock_client)
 
-    results = store.search([0.1, 0.2], limit=3, metadata_filters={"mall_name": "ICONSIAM"})
+    results = store.search(
+        [0.1, 0.2], limit=3, metadata_filters={"mall_name": "ICONSIAM"}
+    )
 
     assert results == [
         SearchResult(

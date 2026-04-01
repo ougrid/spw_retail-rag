@@ -51,7 +51,9 @@ def normalize_time(value: object) -> str:
     lowered = text.lower().replace(".", ":")
     lowered = re.sub(r"\s+", "", lowered)
 
-    meridiem_match = re.fullmatch(r"(?P<hour>\d{1,2})(?::(?P<minute>\d{2}))?(?P<meridiem>am|pm)", lowered)
+    meridiem_match = re.fullmatch(
+        r"(?P<hour>\d{1,2})(?::(?P<minute>\d{2}))?(?P<meridiem>am|pm)", lowered
+    )
     if meridiem_match:
         hour = int(meridiem_match.group("hour"))
         minute = int(meridiem_match.group("minute") or "00")
@@ -80,9 +82,13 @@ def normalize_time(value: object) -> str:
     return ""
 
 
-def ensure_columns(df: pd.DataFrame, required_columns: Iterable[str] = REQUIRED_COLUMNS) -> pd.DataFrame:
+def ensure_columns(
+    df: pd.DataFrame, required_columns: Iterable[str] = REQUIRED_COLUMNS
+) -> pd.DataFrame:
     """Ensure all required columns exist in the dataframe."""
-    missing_columns = [column for column in required_columns if column not in df.columns]
+    missing_columns = [
+        column for column in required_columns if column not in df.columns
+    ]
     if missing_columns:
         raise ValueError(f"Missing required columns: {', '.join(missing_columns)}")
     return df
@@ -95,13 +101,12 @@ def clean_shop_data(df: pd.DataFrame) -> pd.DataFrame:
 
     for column in TEXT_COLUMNS:
         cleaned_df[column] = (
-            cleaned_df[column]
-            .fillna("")
-            .astype(str)
-            .map(_normalize_whitespace)
+            cleaned_df[column].fillna("").astype(str).map(_normalize_whitespace)
         )
 
-    cleaned_df["description"] = cleaned_df["description"].replace("", "No description available.")
+    cleaned_df["description"] = cleaned_df["description"].replace(
+        "", "No description available."
+    )
 
     for column in TIME_COLUMNS:
         cleaned_df[column] = cleaned_df[column].map(normalize_time)

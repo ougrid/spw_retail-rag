@@ -66,7 +66,9 @@ def cluster_names(
     embeddings: dict[str, Sequence[float]] | None = None,
 ) -> list[ClusterSuggestion]:
     """Cluster semantically similar names into candidate normalization groups."""
-    unique_names = [name.strip() for name in dict.fromkeys(names) if name and str(name).strip()]
+    unique_names = [
+        name.strip() for name in dict.fromkeys(names) if name and str(name).strip()
+    ]
     if not unique_names:
         return []
 
@@ -102,10 +104,16 @@ def cluster_names(
     suggestions = []
     for variants in grouped.values():
         canonical = _canonical_name(variants)
-        suggestions.append(ClusterSuggestion(canonical_name=canonical, variants=tuple(sorted(variants))))
+        suggestions.append(
+            ClusterSuggestion(
+                canonical_name=canonical, variants=tuple(sorted(variants))
+            )
+        )
 
     suggestions.sort(key=lambda suggestion: suggestion.canonical_name.lower())
-    logger.info("names_clustered", clusters=len(suggestions), input_count=len(unique_names))
+    logger.info(
+        "names_clustered", clusters=len(suggestions), input_count=len(unique_names)
+    )
     return suggestions
 
 
@@ -148,7 +156,9 @@ def apply_name_mappings(
         raise ValueError(f"Column '{column}' does not exist in dataframe")
 
     normalized_df = df.copy()
-    normalized_df[column] = normalized_df[column].map(lambda value: mappings.get(value, value))
+    normalized_df[column] = normalized_df[column].map(
+        lambda value: mappings.get(value, value)
+    )
     logger.info("name_mappings_applied", column=column, mapping_count=len(mappings))
     return normalized_df
 

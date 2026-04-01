@@ -39,9 +39,14 @@ def test_hierarchical_strategy_adds_detail_chunks_for_long_descriptions():
 
     assert len(documents) > 1
     assert documents[0].metadata["chunk_type"] == "summary"
-    detail_documents = [doc for doc in documents if doc.metadata["chunk_type"] == "detail"]
+    detail_documents = [
+        doc for doc in documents if doc.metadata["chunk_type"] == "detail"
+    ]
     assert detail_documents
-    assert all(doc.metadata["parent_chunk_id"] == documents[0].chunk_id for doc in detail_documents)
+    assert all(
+        doc.metadata["parent_chunk_id"] == documents[0].chunk_id
+        for doc in detail_documents
+    )
 
 
 def test_hierarchical_strategy_preserves_metadata_on_detail_chunks():
@@ -53,7 +58,9 @@ def test_hierarchical_strategy_preserves_metadata_on_detail_chunks():
         ChunkConfig(strategy="hierarchical", max_chunk_tokens=4, overlap_tokens=1),
     )
 
-    detail_document = next(doc for doc in documents if doc.metadata["chunk_type"] == "detail")
+    detail_document = next(
+        doc for doc in documents if doc.metadata["chunk_type"] == "detail"
+    )
     assert detail_document.metadata["shop_name"] == "Nike"
     assert detail_document.metadata["category"] == "Sports"
     assert detail_document.metadata["floor"] == "1"

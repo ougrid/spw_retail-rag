@@ -60,15 +60,23 @@ class InputGuard:
         if not normalized_query:
             return InputGuardResult(False, False, False, "Query cannot be empty.")
 
-        flagged = self._moderation_client.moderate(normalized_query) if self._moderation_client else False
+        flagged = (
+            self._moderation_client.moderate(normalized_query)
+            if self._moderation_client
+            else False
+        )
         if flagged:
             logger.warning("input_guard_flagged", query=normalized_query)
-            return InputGuardResult(False, True, False, "Query was flagged by content moderation.")
+            return InputGuardResult(
+                False, True, False, "Query was flagged by content moderation."
+            )
 
         in_scope = self._is_in_scope(normalized_query)
         if not in_scope:
             logger.info("input_guard_out_of_scope", query=normalized_query)
-            return InputGuardResult(False, False, False, "Query is outside mall information scope.")
+            return InputGuardResult(
+                False, False, False, "Query is outside mall information scope."
+            )
 
         logger.info("input_guard_passed", query=normalized_query)
         return InputGuardResult(True, False, True, "ok")

@@ -57,7 +57,9 @@ def test_output_guard_marks_grounded_answer_with_high_confidence():
         )
     ]
 
-    result = guard.evaluate("Nike is on floor 1 of ICONSIAM and opens at 10:00.", sources)
+    result = guard.evaluate(
+        "Nike is on floor 1 of ICONSIAM and opens at 10:00.", sources
+    )
 
     assert result.grounding_verified is True
     assert result.confidence == "high"

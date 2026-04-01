@@ -44,7 +44,9 @@ class LLMClient:
                     max_tokens=self._max_tokens,
                 )
                 content = response.choices[0].message.content or ""
-                logger.info("llm_completion_created", model=self._model, attempt=attempt + 1)
+                logger.info(
+                    "llm_completion_created", model=self._model, attempt=attempt + 1
+                )
                 return content.strip()
             except Exception as error:
                 last_error = error
@@ -66,7 +68,9 @@ class LLMClient:
         try:
             self._client.models.retrieve(self._model)
         except Exception as error:
-            logger.warning("llm_health_check_failed", model=self._model, error=str(error))
+            logger.warning(
+                "llm_health_check_failed", model=self._model, error=str(error)
+            )
             return False
         logger.info("llm_health_check_passed", model=self._model)
         return True
