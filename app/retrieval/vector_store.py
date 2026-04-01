@@ -106,13 +106,23 @@ class QdrantVectorStore:
     ) -> list[SearchResult]:
         """Search Qdrant using a query vector and optional metadata filters."""
         query_filter = _build_filter(metadata_filters)
-        response = self.client.search(
-            collection_name=self.collection_name,
-            query_vector=query_vector,
-            limit=limit,
-            query_filter=query_filter,
-            score_threshold=score_threshold,
-        )
+        if hasattr(self.client, "search"):
+            response = self.client.search(
+                collection_name=self.collection_name,
+                query_vector=query_vector,
+                limit=limit,
+                query_filter=query_filter,
+                score_threshold=score_threshold,
+            )
+        else:
+            query_response = self.client.query_points(
+                collection_name=self.collection_name,
+                query=query_vector,
+                limit=limit,
+                query_filter=query_filter,
+                score_threshold=score_threshold,
+            )
+            response = query_response.points
 
         results = [
             SearchResult(
