@@ -194,6 +194,12 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 
+# Qdrant local storage
+qdrant_storage/
+
+# Sentence transformers cache
+.cache/
+
 # Cursor
 #  Cursor is an AI-powered code editor. `.cursorignore` specifies files/directories to
 #  exclude from AI features like autocomplete and code analysis. Recommended for sensitive data
