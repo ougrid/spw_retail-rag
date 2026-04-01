@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 
 import gradio as gr
 import httpx
@@ -20,9 +21,10 @@ from app.ingestion.normalizer import (
 )
 
 settings = get_settings()
+DEFAULT_API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
 
 
-def chat_with_api(message: str, history: list[dict[str, str]], api_base_url: str):
+def chat_with_api(message, history, api_base_url):
     response = httpx.post(
         f"{api_base_url.rstrip('/')}/chat",
         json={"query": message},
@@ -47,14 +49,14 @@ def chat_with_api(message: str, history: list[dict[str, str]], api_base_url: str
         or "No sources returned."
     )
 
-    history = history + [
-        {"role": "user", "content": message},
-        {"role": "assistant", "content": payload["answer"]},
-    ]
-    return history, payload["guardrails"], sources_markdown
+    transcript = (
+        (history or "")
+        + f"User: {message}\nAssistant: {payload['answer']}\n\n"
+    )
+    return transcript, payload["answer"], json.dumps(payload["guardrails"], indent=2), sources_markdown
 
 
-def generate_normalization_suggestions() -> pd.DataFrame:
+def generate_normalization_suggestions():
     raw_df = load_csv(settings.data_csv_path)
     cleaned_df = clean_shop_data(raw_df)
     existing_mappings = load_name_mappings(settings.name_mappings_path)
@@ -72,15 +74,19 @@ def generate_normalization_suggestions() -> pd.DataFrame:
             }
         )
 
-    return pd.DataFrame(rows, columns=["approved", "canonical_name", "variants"])
+    return json.dumps(rows, indent=2)
 
 
-def apply_approved_suggestions(suggestions_df: pd.DataFrame) -> str:
-    if suggestions_df is None or suggestions_df.empty:
+def apply_approved_suggestions(suggestions_text):
+    if not suggestions_text or not str(suggestions_text).strip():
+        return "No suggestions to apply."
+
+    suggestions = json.loads(suggestions_text)
+    if not suggestions:
         return "No suggestions to apply."
 
     canonical_to_variants: dict[str, list[str]] = {}
-    for _, row in suggestions_df.iterrows():
+    for row in suggestions:
         if not bool(row.get("approved", False)):
             continue
         canonical = str(row.get("canonical_name", "")).strip()
@@ -99,7 +105,7 @@ def apply_approved_suggestions(suggestions_df: pd.DataFrame) -> str:
     return f"Saved {len(mappings)} mapping entries to {settings.name_mappings_path}."
 
 
-def load_current_mappings() -> str:
+def load_current_mappings():
     mappings = load_name_mappings(settings.name_mappings_path)
     return json.dumps(mappings, indent=2)
 
@@ -108,44 +114,36 @@ with gr.Blocks(title="Retail RAG Assistant") as demo:
     gr.Markdown("# Retail RAG Assistant")
 
     with gr.Tab("Chat"):
-        api_base_url = gr.Textbox(label="API Base URL", value="http://localhost:8000")
-        chatbot = gr.Chatbot(type="messages", label="Mall Assistant")
+        api_base_url = gr.Textbox(label="API Base URL", value=DEFAULT_API_BASE_URL)
         message = gr.Textbox(label="Your question")
-        guardrails_json = gr.JSON(label="Guardrails")
+        transcript = gr.Textbox(label="Conversation", lines=12)
+        answer_box = gr.Textbox(label="Latest Answer", lines=4)
+        guardrails_json = gr.Code(label="Guardrails", language="json")
         sources_markdown = gr.Markdown(label="Sources")
         send_button = gr.Button("Send")
 
         send_button.click(
             chat_with_api,
-            inputs=[message, chatbot, api_base_url],
-            outputs=[chatbot, guardrails_json, sources_markdown],
+            inputs=[message, transcript, api_base_url],
+            outputs=[transcript, answer_box, guardrails_json, sources_markdown],
         )
 
     with gr.Tab("Normalization Review"):
-        suggestions_table = gr.Dataframe(
-            headers=["approved", "canonical_name", "variants"],
-            datatype=["bool", "str", "str"],
-            row_count=(0, "dynamic"),
-            col_count=(3, "fixed"),
-            label="Generated Suggestions",
-            interactive=True,
-        )
+        suggestions_text = gr.Code(label="Generated Suggestions", language="json")
         generate_button = gr.Button("Generate Suggestions")
         apply_button = gr.Button("Apply Approved Suggestions")
         apply_status = gr.Textbox(label="Apply Status")
         current_mappings = gr.Code(label="Current Mappings", language="json")
         refresh_button = gr.Button("Refresh Current Mappings")
 
-        generate_button.click(
-            generate_normalization_suggestions, outputs=[suggestions_table]
-        )
+        generate_button.click(generate_normalization_suggestions, outputs=[suggestions_text])
         apply_button.click(
             apply_approved_suggestions,
-            inputs=[suggestions_table],
+            inputs=[suggestions_text],
             outputs=[apply_status],
         )
         refresh_button.click(load_current_mappings, outputs=[current_mappings])
 
 
 if __name__ == "__main__":
-    demo.launch()
+    demo.launch(server_name="0.0.0.0", server_port=7860)
