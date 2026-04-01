@@ -60,3 +60,13 @@ class LLMClient:
                 attempt += 1
 
         raise RuntimeError("LLM completion failed after retries") from last_error
+
+    def health_check(self) -> bool:
+        """Check whether the configured model is reachable."""
+        try:
+            self._client.models.retrieve(self._model)
+        except Exception as error:
+            logger.warning("llm_health_check_failed", model=self._model, error=str(error))
+            return False
+        logger.info("llm_health_check_passed", model=self._model)
+        return True
