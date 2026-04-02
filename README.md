@@ -219,7 +219,7 @@ cp .env.example .env
 # Edit .env and set OPENAI_API_KEY
 
 # 4. Start Qdrant (requires Docker)
-docker run -d -p 6333:6333 -p 6334:6334 qdrant/qdrant:v1.13.6
+docker run -d -p 6333:6333 -p 6334:6334 qdrant/qdrant:v1.17.1
 
 # 5. Run data ingestion
 python scripts/ingest.py --auto --recreate
@@ -559,11 +559,12 @@ The prompt system (`app/generation/prompts.py`) is designed to prevent hallucina
 **System prompt:**
 
 ```
-You are a helpful mall information assistant.
+You are a friendly and helpful shopping-mall concierge.
 Answer only using the provided retrieved context.
 Do not invent shop names, opening hours, categories, mall names, or floor information.
-If the answer is not contained in the retrieved context, say that you do not have that information.
-Be concise, accurate, and conversational.
+When the request is broad, suggest matching shops from the context and ask a brief follow-up question.
+If the context is insufficient, say so warmly and suggest what you can still help with.
+Respond conversationally and match the user's language when possible.
 ```
 
 **Context injection:**
@@ -579,20 +580,20 @@ Athletic footwear and apparel. Open from 10:00 to 22:00.
 
 **User prompt wrapper:**
 
-The user's question is wrapped with an explicit grounding instruction:
+The user's question is wrapped with grounding plus concierge behavior instructions:
 
 ```
-Based on the following context, answer the user's question.
-If the information is not in the context, say so.
+Use the retrieved context below to answer the user question.
+If you can answer, also suggest a helpful follow-up.
+If the context is insufficient, say so warmly and suggest what you can help with.
 
-<context>
+Retrieved context:
 {numbered source blocks}
-</context>
 
-Question: {user's query}
+User question: {user's query}
 ```
 
-This layered approach — constitutional system prompt, verbatim context injection, and explicit grounding instructions — minimizes the chance of the LLM inventing facts.
+This layered approach keeps the answer grounded while making the assistant feel more like a concierge than a blunt search endpoint.
 
 ### Generation
 
@@ -611,10 +612,11 @@ The system uses **four layers of guardrails** instead of relying on a single pro
 | Check                | Mechanism                                                                                                   |
 |----------------------|-------------------------------------------------------------------------------------------------------------|
 | Content moderation   | Real OpenAI moderation via `omni-moderation-latest` with a pluggable client seam for other providers       |
-| Topical scope        | Keyword-based check against 23+ topic terms (`mall`, `shop`, `store`, `floor`, `category`, `hour`, `time`, `fashion`, `sports`, `beauty`, `electronics`, `cafe`, `supermarket`, etc.) |
+| Scope fast-pass      | Expanded English and Thai shopping-intent keywords catch obvious in-scope queries for free                  |
+| Scope fallback       | A lightweight `gpt-4o-mini` intent classifier runs only when keywords miss to catch indirect or multilingual retail intent |
 | Empty query          | Rejects blank input before processing                                                                       |
 
-Thai retail/location phrasing such as `ร้าน`, `อยู่ที่ไหน`, `เวลา`, and `ชั้น` is also treated as in-scope. Harmful queries are blocked before retrieval.
+The scope guard now uses a tiered strategy rather than a keyword-only gate. Obvious requests such as `Where can I buy shoes?`, `I want a T-shirt`, and `อยากได้ชุดลำลองใส่ไปเที่ยว` pass immediately through the keyword fast-path, while ambiguous queries can still be rescued by the LLM intent classifier. Truly off-topic questions receive a warm concierge redirect instead of a blunt rejection.
 
 #### Layer 2 — Prompt-level guardrails
 
@@ -631,7 +633,7 @@ Thai retail/location phrasing such as `ร้าน`, `อยู่ที่ไ�
 | Entity grounding       | Checks that shop names and mall names from retrieved sources appear in the combined source text   |
 | Confidence scoring     | Based on the best retrieval score: **high** (≥ 0.85), **medium** (≥ 0.65), **low** (< 0.65)     |
 
-If grounding verification fails, the pipeline replaces the generated answer with a safe fallback: _"I do not have that information based on the retrieved context."_
+If grounding verification fails, the pipeline replaces the generated answer with a warmer concierge fallback: _"I don't have that specific information in my records right now. I can help you find shops, check opening hours, or suggest stores by category — what would you like to know?"_
 
 #### Layer 4 — Source transparency
 
@@ -679,7 +681,7 @@ The Chat tab now exposes a **Retrieval Debug** panel so reviewers can inspect:
 
 ## Testing
 
-The project includes **53 unit tests** across 9 test modules, all using **pytest** with mocks and stubs (no external services required):
+The project currently includes **58 collected tests** across **10 test modules**, all using **pytest** with mocks and stubs (no external services required):
 
 ```bash
 # Run the full test suite
@@ -697,14 +699,15 @@ pytest tests/test_pipeline.py
 | Test File              | Tests | What is covered                                                                          |
 |------------------------|-------|------------------------------------------------------------------------------------------|
 | `test_cleaner.py`      | 3     | Time normalization (10 parametrized format cases), data cleaning, missing column detection |
-| `test_normalizer.py`   | 5     | Name clustering, embedding similarity, external reviewer protocol, save/load round-trip, unknown name detection |
+| `test_normalizer.py`   | 7     | Name clustering, embedding similarity, external reviewer protocol, save/load round-trip, unknown name detection, OpenAI reviewer parsing |
 | `test_chunker.py`      | 4     | Single-chunk strategy, hierarchical strategy, metadata preservation, metadata field correctness |
-| `test_vector_store.py` | 5+    | Embedding batch/query, Qdrant filter construction, collection CRUD, upsert, search results, point count, health check |
+| `test_vector_store.py` | 8     | Embedding batch/query, Qdrant filter construction, collection CRUD, upsert, search results, point count, health check |
 | `test_generation.py`   | 4     | Context block building, message assembly, LLM completion, retry exhaustion handling       |
-| `test_guardrails.py`   | 8     | Flagged-content blocking, Thai in-scope detection, real moderation client seam, grounded-answer verification, unknown-time detection |
+| `test_guardrails.py`   | 12    | Flagged-content blocking, shopping-intent detection, Thai in-scope detection, LLM intent fallback, real moderation client seam, grounded-answer verification, unknown-time detection |
 | `test_hybrid_retrieval.py` | 3  | Hybrid filter plans, lexical reranking, minimum-score cutoff behavior                     |
 | `test_pipeline.py`     | 4     | Out-of-scope blocking, no-sources fallback, grounded answer flow, ungrounded → fallback replacement |
 | `test_api.py`          | 3     | Chat endpoint response schema, health endpoint, X-Request-ID middleware propagation       |
+| `test_query_evaluations.py` | 1 | Fixture-driven regression coverage for Thai and product-intent retail queries             |
 
 All tests mock external dependencies (OpenAI, Qdrant) and can run offline without any API keys.
 
