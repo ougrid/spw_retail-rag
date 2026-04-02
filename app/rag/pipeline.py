@@ -2,17 +2,19 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
 import structlog
 
-from app.generation.prompts import build_messages
+from app.generation.prompts import build_follow_up_rewrite_messages, build_messages
 from app.guardrails.input_guard import InputGuard, InputGuardResult
 from app.guardrails.output_guard import OutputGuard, OutputGuardResult
 from app.rag.query_analyzer import QueryAnalyzer
 from app.retrieval.hybrid import HybridRetriever
 from app.retrieval.vector_store import SearchResult
+from app.session_memory import ConversationTurn
 
 logger = structlog.get_logger(__name__)
 
@@ -21,6 +23,27 @@ FALLBACK_ANSWER = (
     "I can help you find shops, check opening hours, or suggest stores by category — "
     "what would you like to know?"
 )
+
+SHORT_FOLLOW_UP_MAX_CHARS = 24
+FOLLOW_UP_MARKERS = {
+    "ok",
+    "okay",
+    "yes",
+    "yes please",
+    "sure",
+    "go",
+    "go there",
+    "take me there",
+    "need",
+    "i want that",
+    "that one",
+    "โอเค",
+    "ได้",
+    "เอา",
+    "ต้องการ",
+    "ครับ",
+    "ค่ะ",
+}
 
 
 @dataclass(frozen=True)
@@ -61,15 +84,21 @@ class RAGPipeline:
         self._score_threshold = score_threshold
 
     def answer(
-        self, query: str, metadata_filters: dict[str, str] | None = None
+        self,
+        query: str,
+        metadata_filters: dict[str, str] | None = None,
+        conversation_history: Sequence[ConversationTurn] | None = None,
     ) -> RAGResponse:
-        input_result = self._input_guard.evaluate(query)
+        conversation_history = list(conversation_history or [])
+        resolved_query = self._resolve_query(query, conversation_history)
+
+        input_result = self._input_guard.evaluate(resolved_query)
         if not input_result.allowed:
             return self._blocked_response(input_result)
 
-        query_embedding = self._embedding_client.embed_query(query)
+        query_embedding = self._embedding_client.embed_query(resolved_query)
         retrieval_result = self._retriever.retrieve(
-            query,
+            resolved_query,
             query_embedding,
             explicit_filters=metadata_filters,
         )
@@ -85,7 +114,12 @@ class RAGPipeline:
                 retrieval_debug=retrieval_result.debug,
             )
 
-        messages = build_messages(query, sources)
+        messages = build_messages(
+            query,
+            sources,
+            conversation_history=conversation_history,
+            resolved_query=resolved_query,
+        )
         raw_answer = self._llm_client.generate(messages)
         output_result = self._output_guard.evaluate(raw_answer, sources)
         final_answer = (
@@ -106,6 +140,40 @@ class RAGPipeline:
             confidence=output_result.confidence,
         )
         return response
+
+    def _resolve_query(
+        self,
+        query: str,
+        conversation_history: Sequence[ConversationTurn],
+    ) -> str:
+        if not conversation_history or not self._needs_follow_up_resolution(query):
+            return query
+
+        try:
+            rewritten = self._llm_client.generate(
+                build_follow_up_rewrite_messages(query, conversation_history)
+            ).strip()
+        except Exception as error:
+            logger.warning("rag_query_rewrite_failed", query=query, error=str(error))
+            return query
+
+        if not rewritten:
+            return query
+
+        logger.info(
+            "rag_query_rewritten",
+            original_query=query,
+            resolved_query=rewritten,
+        )
+        return rewritten
+
+    def _needs_follow_up_resolution(self, query: str) -> bool:
+        normalized = " ".join(query.strip().lower().split())
+        if not normalized:
+            return False
+        if normalized in FOLLOW_UP_MARKERS:
+            return True
+        return len(query.strip()) <= SHORT_FOLLOW_UP_MAX_CHARS
 
     def _blocked_response(self, input_result: InputGuardResult) -> RAGResponse:
         return RAGResponse(

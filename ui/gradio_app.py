@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from uuid import uuid4
 
 import gradio as gr
 import httpx
@@ -26,10 +27,10 @@ settings = get_settings()
 DEFAULT_API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
 
 
-def chat_with_api(message, history, api_base_url):
+def chat_with_api(message, history, api_base_url, session_id):
     response = httpx.post(
         f"{api_base_url.rstrip('/')}/chat",
-        json={"query": message},
+        json={"query": message, "session_id": session_id or str(uuid4())},
         timeout=30.0,
     )
     response.raise_for_status()
@@ -60,7 +61,12 @@ def chat_with_api(message, history, api_base_url):
         json.dumps(payload["guardrails"], indent=2),
         sources_markdown,
         json.dumps(payload.get("retrieval_debug") or {}, indent=2, ensure_ascii=False),
+        payload["session_id"],
     )
+
+
+def reset_chat_session():
+    return "", "", "{}", "No sources returned.", "{}", str(uuid4())
 
 
 def generate_normalization_suggestions():
@@ -131,6 +137,7 @@ with gr.Blocks(title="Retail RAG Assistant") as demo:
 
     with gr.Tab("Chat"):
         api_base_url = gr.Textbox(label="API Base URL", value=DEFAULT_API_BASE_URL)
+        session_id = gr.State(str(uuid4()))
         message = gr.Textbox(label="Your question")
         transcript = gr.Textbox(label="Conversation", lines=12)
         answer_box = gr.Textbox(label="Latest Answer", lines=4)
@@ -138,16 +145,29 @@ with gr.Blocks(title="Retail RAG Assistant") as demo:
         sources_markdown = gr.Markdown(label="Sources")
         retrieval_debug_json = gr.Code(label="Retrieval Debug", language="json")
         send_button = gr.Button("Send")
+        new_session_button = gr.Button("New Session")
 
         send_button.click(
             chat_with_api,
-            inputs=[message, transcript, api_base_url],
+            inputs=[message, transcript, api_base_url, session_id],
             outputs=[
                 transcript,
                 answer_box,
                 guardrails_json,
                 sources_markdown,
                 retrieval_debug_json,
+                session_id,
+            ],
+        )
+        new_session_button.click(
+            reset_chat_session,
+            outputs=[
+                transcript,
+                answer_box,
+                guardrails_json,
+                sources_markdown,
+                retrieval_debug_json,
+                session_id,
             ],
         )
 
