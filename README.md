@@ -138,6 +138,7 @@ spw_retail-rag/
 │   │   ├── input_guard.py    # Content moderation + topical scope check
 │   │   ├── openai_moderation.py # Real OpenAI moderation client
 │   │   └── output_guard.py   # Grounding verification + confidence scoring
+│   ├── session_memory.py     # In-memory session store for recent conversation turns
 │   ├── ingestion/
 │   │   ├── loader.py         # CSV loading with column normalization
 │   │   ├── cleaner.py        # Whitespace, time format, missing value handling
@@ -164,6 +165,7 @@ spw_retail-rag/
 │   ├── test_guardrails.py    # Input and output guardrail tests
 │   ├── test_normalizer.py    # Normalization clustering and mapping tests
 │   ├── test_pipeline.py      # End-to-end RAG pipeline tests
+│   ├── test_session_memory.py # Session-memory retention tests
 │   └── test_vector_store.py  # Qdrant operations and embedding tests
 ├── ui/
 │   └── gradio_app.py         # Gradio chat UI + normalization review panel
@@ -310,6 +312,7 @@ Without `--auto`, the script prints unknown name clusters as JSON for manual rev
 ```json
 {
   "query": "What sports shops are in ICONSIAM?",
+  "session_id": "c2db21ff-1cb6-4d6b-bff5-50b5e3fced1d",
   "metadata_filters": {
     "mall_name": "ICONSIAM",
     "category": "Sports"
@@ -318,6 +321,7 @@ Without `--auto`, the script prints unknown name clusters as JSON for manual rev
 ```
 
 - `query` (string, required): The user's natural-language question. Minimum 1 character.
+- `session_id` (string, optional): A client-managed conversation id. When provided, the API reuses recent turns from that session to resolve short follow-ups like `okay`, `that one`, or `ต้องการ`.
 - `metadata_filters` (object, optional): Key-value pairs to filter retrieval results by metadata fields (`mall_name`, `category`, `floor`, etc.).
 
 **Response body:**
@@ -325,6 +329,7 @@ Without `--auto`, the script prints unknown name clusters as JSON for manual rev
 ```json
 {
   "answer": "Nike is a Sports shop located on floor 1 of ICONSIAM, offering athletic footwear and apparel. It's open from 10:00 to 22:00.",
+  "session_id": "c2db21ff-1cb6-4d6b-bff5-50b5e3fced1d",
   "sources": [
     {
       "chunk_id": "shop-1-summary",
@@ -351,6 +356,7 @@ Without `--auto`, the script prints unknown name clusters as JSON for manual rev
 ```
 
 - `answer`: The generated response, grounded in the retrieved sources.
+- `session_id`: The conversation id that the API used for session memory. The Gradio UI stores and reuses this automatically per browser chat session.
 - `sources`: The exact data chunks used to produce the answer, including full metadata and relevance scores.
 - `guardrails`: A transparency object describing what safety checks were performed and their results.
 - `retrieval_debug`: Reviewer-facing retrieval diagnostics including inferred filters, tried filter plans, candidate scores, and reranking decisions.
@@ -524,24 +530,28 @@ The end-to-end pipeline (`app/rag/pipeline.py`) orchestrates every step of the q
 
 ```
 1. Input Guardrails  →  Block harmful or off-topic queries
-2. Embed Query       →  OpenAI text-embedding-3-small
-3. Retrieve          →  Qdrant semantic search (top-k, score threshold, metadata filters)
-4. No Sources?       →  Return "I don't have that information" fallback
-5. Build Prompt      →  System prompt + numbered source context + user question
-6. Generate          →  OpenAI gpt-4o-mini completion
-7. Output Guardrails →  Verify grounding + assess confidence
-8. Ungrounded?       →  Replace answer with safe fallback
-9. Return            →  Answer + sources + guardrail metadata
+2. Session Memory    →  Load recent turns for the current `session_id`
+3. Resolve Follow-up →  Rewrite short/ambiguous replies into a standalone request when needed
+4. Embed Query       →  OpenAI text-embedding-3-small
+5. Retrieve          →  Qdrant semantic search (top-k, score threshold, metadata filters)
+6. No Sources?       →  Return warm concierge fallback
+7. Build Prompt      →  System prompt + recent conversation + source context + user question
+8. Generate          →  OpenAI gpt-4o-mini completion
+9. Output Guardrails →  Verify grounding + assess confidence
+10. Ungrounded?      →  Replace answer with safe fallback
+11. Return           →  Answer + sources + guardrail metadata + `session_id`
 ```
 
 ### Retrieval
 
 The retrieval path now combines Qdrant vector search with query understanding and lexical reranking:
 
+- **Session-aware follow-up resolution** rewrites short messages such as `โอเค ไป Zara` or `ต้องการ` into standalone retail queries using the recent conversation before retrieval runs.
+
 - **Query analyzer** infers metadata filters from the user query, including:
   - `shop_name` alias matching such as `applestore` -> `Apple Store`
   - `mall_name` alias matching using normalized historical variants
-  - `category` inference from product intent, such as `watch` -> `Jewelry` and `shoes` -> `Sports`
+  - `category` inference from product intent, such as `watch` -> `Jewelry`, `shoes` -> `Sports`, and Thai fashion-intent phrases like `ชุดลำลอง` -> `Fashion`
 - **Metadata filtering** is applied in Qdrant using payload filters when explicit or inferred metadata is available.
 - **Hybrid retrieval** collects vector candidates from one or more filter plans and reranks them using:
   - vector similarity,
@@ -550,11 +560,11 @@ The retrieval path now combines Qdrant vector search with query understanding an
   - inferred metadata match boosts.
 - **Fallback filter plans** progressively relax inferred filters only when needed, improving recall without dropping explicit user-supplied filters.
 
-This hybrid approach fixed weak-product-intent queries that pure vector retrieval missed, such as `Where can I buy Nike shoes?` and `Where can I buy a watch?`.
+This hybrid approach fixed weak-product-intent queries that pure vector retrieval missed, such as `Where can I buy Nike shoes?`, `Where can I buy a watch?`, and Thai fashion-intent queries like `อยากได้ชุดลำลอง`.
 
 ### Prompt Engineering
 
-The prompt system (`app/generation/prompts.py`) is designed to prevent hallucination and keep answers grounded:
+The prompt system (`app/generation/prompts.py`) is designed to prevent hallucination, use recent chat history safely, and keep answers grounded:
 
 **System prompt:**
 
@@ -563,6 +573,7 @@ You are a friendly and helpful shopping-mall concierge.
 Answer only using the provided retrieved context.
 Do not invent shop names, opening hours, categories, mall names, or floor information.
 When the request is broad, suggest matching shops from the context and ask a brief follow-up question.
+When the user wants to go to a specific shop, give the grounded location details and ask whether they want directions.
 If the context is insufficient, say so warmly and suggest what you can still help with.
 Respond conversationally and match the user's language when possible.
 ```
@@ -580,12 +591,16 @@ Athletic footwear and apparel. Open from 10:00 to 22:00.
 
 **User prompt wrapper:**
 
-The user's question is wrapped with grounding plus concierge behavior instructions:
+The user's question is wrapped with grounding plus concierge behavior instructions, and the recent conversation is included when a `session_id` is in play:
 
 ```
 Use the retrieved context below to answer the user question.
 If you can answer, also suggest a helpful follow-up.
 If the context is insufficient, say so warmly and suggest what you can help with.
+
+Recent conversation:
+User: ...
+Assistant: ...
 
 Retrieved context:
 {numbered source blocks}
@@ -593,7 +608,7 @@ Retrieved context:
 User question: {user's query}
 ```
 
-This layered approach keeps the answer grounded while making the assistant feel more like a concierge than a blunt search endpoint.
+For short follow-ups, the system also runs a small rewrite prompt first so messages like `ต้องการ` become a standalone request for retrieval while the final answer still uses the original conversational turn.
 
 ### Generation
 
@@ -657,6 +672,8 @@ A web-based chat interface for asking questions about mall shops. It displays:
 - The AI-generated answer
 - Guardrail results (flagged, in-scope, grounding, confidence)
 - Full source chunks with metadata
+- A browser-session-backed conversation that reuses the same `session_id` automatically across turns
+- A `New Session` button to clear the current chat memory and start a fresh conversation
 
 ### Normalization Review Tab (Admin)
 
@@ -681,7 +698,7 @@ The Chat tab now exposes a **Retrieval Debug** panel so reviewers can inspect:
 
 ## Testing
 
-The project currently includes **58 collected tests** across **10 test modules**, all using **pytest** with mocks and stubs (no external services required):
+The project currently includes **62 collected tests** across **11 test modules**, all using **pytest** with mocks and stubs (no external services required):
 
 ```bash
 # Run the full test suite
@@ -705,9 +722,10 @@ pytest tests/test_pipeline.py
 | `test_generation.py`   | 4     | Context block building, message assembly, LLM completion, retry exhaustion handling       |
 | `test_guardrails.py`   | 12    | Flagged-content blocking, shopping-intent detection, Thai in-scope detection, LLM intent fallback, real moderation client seam, grounded-answer verification, unknown-time detection |
 | `test_hybrid_retrieval.py` | 3  | Hybrid filter plans, lexical reranking, minimum-score cutoff behavior                     |
-| `test_pipeline.py`     | 4     | Out-of-scope blocking, no-sources fallback, grounded answer flow, ungrounded → fallback replacement |
-| `test_api.py`          | 3     | Chat endpoint response schema, health endpoint, X-Request-ID middleware propagation       |
+| `test_pipeline.py`     | 5     | Out-of-scope blocking, no-sources fallback, grounded answer flow, ungrounded → fallback replacement, short follow-up query rewriting |
+| `test_api.py`          | 4     | Chat endpoint response schema, session-id propagation, session-history reuse, health endpoint, X-Request-ID middleware propagation |
 | `test_query_evaluations.py` | 1 | Fixture-driven regression coverage for Thai and product-intent retail queries             |
+| `test_session_memory.py` | 2 | In-memory session history retention and truncation behavior                               |
 
 All tests mock external dependencies (OpenAI, Qdrant) and can run offline without any API keys.
 
