@@ -1,6 +1,6 @@
 # Retail RAG Chatbot
 
-A production-ready Retrieval-Augmented Generation (RAG) chatbot that answers user questions about mall shops and tenants. Built with FastAPI, Qdrant, and OpenAI, it demonstrates a complete pipeline: data ingestion with intelligent cleaning and normalization, vector-based semantic retrieval, grounded LLM generation with multi-layer guardrails, transparent source attribution, and a Gradio-based user interface — all containerized with Docker.
+A production-ready Retrieval-Augmented Generation (RAG) chatbot that answers user questions about mall shops and tenants. Built with FastAPI, Qdrant, and OpenAI, it demonstrates a complete pipeline: data ingestion with intelligent cleaning and LLM-assisted normalization, hybrid lexical-plus-vector retrieval, grounded LLM generation, real OpenAI moderation, transparent source attribution, and a Gradio-based user interface — all containerized with Docker.
 
 ---
 
@@ -69,10 +69,14 @@ The system is split into two main flows — **ingestion** (offline, one-time) an
                           ┌─────────────────────────────────────┐
                           │           QUERY FLOW                │
                           │                                     │
-  User Query ──► Input Guardrails ──► Embed Query               │
+  User Query ──► Input Guardrails ──► Query Analyzer            │
                           │                │                    │
-                          │          Qdrant Search              │
-                          │          (semantic + filter)        │
+                          │          Embed Query                │
+                          │                │                    │
+                          │          Hybrid Retrieval           │
+                          │          (metadata filters +        │
+                          │           Qdrant vector search +    │
+                          │           lexical reranking)        │
                           │                │                    │
                           │          Prompt Builder             │
                           │          (system + context + query) │
@@ -132,16 +136,20 @@ spw_retail-rag/
 │   │   └── prompts.py        # System prompt, context builder, message assembly
 │   ├── guardrails/
 │   │   ├── input_guard.py    # Content moderation + topical scope check
+│   │   ├── openai_moderation.py # Real OpenAI moderation client
 │   │   └── output_guard.py   # Grounding verification + confidence scoring
 │   ├── ingestion/
 │   │   ├── loader.py         # CSV loading with column normalization
 │   │   ├── cleaner.py        # Whitespace, time format, missing value handling
 │   │   ├── normalizer.py     # Embedding-based clustering + LLM review pipeline
-│   │   └── chunker.py        # Single and hierarchical chunking strategies
+│   │   └── openai_reviewer.py # LLM-backed normalization reviewer
+│   │   ├── chunker.py        # Single and hierarchical chunking strategies
 │   ├── rag/
-│   │   └── pipeline.py       # End-to-end RAG orchestration
+│   │   ├── pipeline.py       # End-to-end RAG orchestration
+│   │   └── query_analyzer.py # Query-to-metadata filter inference
 │   └── retrieval/
 │       ├── embeddings.py     # OpenAI embedding client
+│       ├── hybrid.py         # Hybrid lexical + vector reranking
 │       └── vector_store.py   # Qdrant wrapper (upsert, search, health)
 ├── data/
 │   ├── shops.csv             # Source dataset (12 shops across 3 malls)
@@ -416,9 +424,10 @@ Rather than hardcoding a name mapping (brittle, fails on unseen variants), the s
 - Use a **Union-Find** algorithm to group names exceeding a configurable similarity threshold (default 0.75).
 - Example result: `{"ICONSIAM": ["Icon Siam", "icon-siam", "ICONSIAM"]}`
 
-**Stage 2 — Review hook:**
-- A `NameReviewer` protocol allows plugging in an LLM-based reviewer that validates cluster groupings and selects canonical names.
-- In automated mode (`--auto`), the default reviewer auto-approves all multi-variant clusters.
+**Stage 2 — LLM semantic review:**
+- An OpenAI-backed reviewer validates candidate clusters and chooses canonical names.
+- The reviewer is prompted to approve only true same-mall variants and to return standardized customer-facing names as JSON.
+- If the LLM review fails for any reason, the ingestion flow falls back to the deterministic default reviewer so ingestion still completes safely.
 
 **Stage 3 — Human review (Gradio UI):**
 - The Gradio admin panel ("Normalization Review" tab) displays suggested clusters.
@@ -487,14 +496,21 @@ The end-to-end pipeline (`app/rag/pipeline.py`) orchestrates every step of the q
 
 ### Retrieval
 
-The retrieval layer (`app/retrieval/vector_store.py`) wraps Qdrant with:
+The retrieval path now combines Qdrant vector search with query understanding and lexical reranking:
 
-- **Semantic similarity search** using cosine distance on the query embedding.
-- **Metadata filtering** — optional field-level conditions (e.g., `mall_name = "ICONSIAM"`) are passed as Qdrant `Filter(must=[...])` expressions, combining vector similarity with exact-match constraints.
-- **Score threshold** — results below `RETRIEVAL_SCORE_THRESHOLD` (default 0.5) are discarded to avoid noise.
-- **Top-k** — returns up to `RETRIEVAL_TOP_K` results (default 5).
+- **Query analyzer** infers metadata filters from the user query, including:
+  - `shop_name` alias matching such as `applestore` -> `Apple Store`
+  - `mall_name` alias matching using normalized historical variants
+  - `category` inference from product intent, such as `watch` -> `Jewelry` and `shoes` -> `Sports`
+- **Metadata filtering** is applied in Qdrant using payload filters when explicit or inferred metadata is available.
+- **Hybrid retrieval** collects vector candidates from one or more filter plans and reranks them using:
+  - vector similarity,
+  - lexical token overlap,
+  - exact shop-name and mall-name phrase matches,
+  - inferred metadata match boosts.
+- **Fallback filter plans** progressively relax inferred filters only when needed, improving recall without dropping explicit user-supplied filters.
 
-Each result includes the full chunk text, metadata, and a relevance score.
+This hybrid approach fixed weak-product-intent queries that pure vector retrieval missed, such as `Where can I buy Nike shoes?` and `Where can I buy a watch?`.
 
 ### Prompt Engineering
 
@@ -554,11 +570,11 @@ The system uses **four layers of guardrails** instead of relying on a single pro
 
 | Check                | Mechanism                                                                                                   |
 |----------------------|-------------------------------------------------------------------------------------------------------------|
-| Content moderation   | Pluggable `ModerationClient` protocol — slot for OpenAI Moderation API or custom provider                   |
+| Content moderation   | Real OpenAI moderation via `omni-moderation-latest` with a pluggable client seam for other providers       |
 | Topical scope        | Keyword-based check against 23+ topic terms (`mall`, `shop`, `store`, `floor`, `category`, `hour`, `time`, `fashion`, `sports`, `beauty`, `electronics`, `cafe`, `supermarket`, etc.) |
 | Empty query          | Rejects blank input before processing                                                                       |
 
-Out-of-scope queries receive a polite redirect: _"I can only help with mall and shop related questions."_
+Thai retail/location phrasing such as `ร้าน`, `อยู่ที่ไหน`, `เวลา`, and `ชั้น` is also treated as in-scope. Harmful queries are blocked before retrieval.
 
 #### Layer 2 — Prompt-level guardrails
 
@@ -615,7 +631,7 @@ Access the UI at **http://localhost:7860** after starting the services.
 
 ## Testing
 
-The project includes **47 unit tests** across 8 test modules, all using **pytest** with mocks and stubs (no external services required):
+The project includes **53 unit tests** across 9 test modules, all using **pytest** with mocks and stubs (no external services required):
 
 ```bash
 # Run the full test suite
@@ -637,7 +653,8 @@ pytest tests/test_pipeline.py
 | `test_chunker.py`      | 4     | Single-chunk strategy, hierarchical strategy, metadata preservation, metadata field correctness |
 | `test_vector_store.py` | 5+    | Embedding batch/query, Qdrant filter construction, collection CRUD, upsert, search results, point count, health check |
 | `test_generation.py`   | 4     | Context block building, message assembly, LLM completion, retry exhaustion handling       |
-| `test_guardrails.py`   | 5     | Flagged-content blocking, out-of-scope detection, valid-query pass-through, grounded-answer verification, unknown-time detection |
+| `test_guardrails.py`   | 8     | Flagged-content blocking, Thai in-scope detection, real moderation client seam, grounded-answer verification, unknown-time detection |
+| `test_hybrid_retrieval.py` | 3  | Hybrid filter plans, lexical reranking, minimum-score cutoff behavior                     |
 | `test_pipeline.py`     | 4     | Out-of-scope blocking, no-sources fallback, grounded answer flow, ungrounded → fallback replacement |
 | `test_api.py`          | 3     | Chat endpoint response schema, health endpoint, X-Request-ID middleware propagation       |
 
@@ -660,8 +677,13 @@ All settings are managed via environment variables (or a `.env` file). The table
 | `LLM_MODEL`              | `gpt-4o-mini`              | OpenAI chat model for answer generation                    |
 | `LLM_TEMPERATURE`        | `0.1`                      | Generation temperature (lower = more deterministic)        |
 | `LLM_MAX_TOKENS`         | `1024`                     | Maximum tokens in generated response                       |
+| `MODERATION_ENABLED`     | `true`                     | Enable real OpenAI moderation before retrieval             |
+| `MODERATION_MODEL`       | `omni-moderation-latest`   | OpenAI moderation model                                    |
+| `NORMALIZATION_REVIEW_MODEL` | `gpt-4o-mini`          | OpenAI model used for normalization cluster review         |
 | `RETRIEVAL_TOP_K`        | `5`                        | Maximum number of chunks to retrieve per query             |
 | `RETRIEVAL_SCORE_THRESHOLD` | `0.5`                   | Minimum cosine similarity score to include a result        |
+| `HYBRID_CANDIDATE_MULTIPLIER` | `4`                  | Candidate expansion multiplier before hybrid reranking     |
+| `HYBRID_MIN_SCORE`       | `0.2`                      | Minimum hybrid score required to keep a retrieval result   |
 | `APP_HOST`               | `0.0.0.0`                  | API server bind address                                    |
 | `APP_PORT`               | `8000`                     | API server port                                            |
 | `LOG_LEVEL`              | `INFO`                     | Logging level (`DEBUG`, `INFO`, `WARNING`, `ERROR`)        |
