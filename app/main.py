@@ -11,9 +11,12 @@ from app.api.routes import router
 from app.config import Settings, get_settings
 from app.generation.llm import LLMClient
 from app.guardrails.input_guard import InputGuard
+from app.guardrails.openai_moderation import OpenAIModerationClient
 from app.guardrails.output_guard import OutputGuard
 from app.rag.pipeline import RAGPipeline
+from app.rag.query_analyzer import QueryAnalyzer
 from app.retrieval.embeddings import EmbeddingClient
+from app.retrieval.hybrid import HybridRetriever
 from app.retrieval.vector_store import QdrantVectorStore
 
 
@@ -38,12 +41,31 @@ async def lifespan(app: FastAPI):
             temperature=settings.llm_temperature,
             max_tokens=settings.llm_max_tokens,
         )
+        moderation_client = None
+        if settings.moderation_enabled and settings.openai_api_key:
+            moderation_client = OpenAIModerationClient(
+                api_key=settings.openai_api_key,
+                model=settings.moderation_model,
+            )
+        query_analyzer = QueryAnalyzer.from_paths(
+            data_csv_path=settings.data_csv_path,
+            name_mappings_path=settings.name_mappings_path,
+        )
+        retriever = HybridRetriever(
+            vector_store=vector_store,
+            query_analyzer=query_analyzer,
+            top_k=settings.retrieval_top_k,
+            candidate_multiplier=settings.hybrid_candidate_multiplier,
+            minimum_hybrid_score=settings.hybrid_min_score,
+        )
         app.state.pipeline = RAGPipeline(
             embedding_client=embedding_client,
             vector_store=vector_store,
             llm_client=llm_client,
-            input_guard=InputGuard(),
+            input_guard=InputGuard(moderation_client=moderation_client),
             output_guard=OutputGuard(),
+            query_analyzer=query_analyzer,
+            retriever=retriever,
             top_k=settings.retrieval_top_k,
             score_threshold=settings.retrieval_score_threshold,
         )

@@ -10,6 +10,8 @@ import structlog
 from app.generation.prompts import build_messages
 from app.guardrails.input_guard import InputGuard, InputGuardResult
 from app.guardrails.output_guard import OutputGuard, OutputGuardResult
+from app.rag.query_analyzer import QueryAnalyzer
+from app.retrieval.hybrid import HybridRetriever
 from app.retrieval.vector_store import SearchResult
 
 logger = structlog.get_logger(__name__)
@@ -34,6 +36,8 @@ class RAGPipeline:
         llm_client: Any,
         input_guard: InputGuard,
         output_guard: OutputGuard,
+        query_analyzer: QueryAnalyzer | None = None,
+        retriever: HybridRetriever | None = None,
         top_k: int = 5,
         score_threshold: float | None = None,
     ) -> None:
@@ -42,6 +46,12 @@ class RAGPipeline:
         self._llm_client = llm_client
         self._input_guard = input_guard
         self._output_guard = output_guard
+        self._query_analyzer = query_analyzer or QueryAnalyzer()
+        self._retriever = retriever or HybridRetriever(
+            vector_store=vector_store,
+            query_analyzer=self._query_analyzer,
+            top_k=top_k,
+        )
         self._top_k = top_k
         self._score_threshold = score_threshold
 
@@ -53,11 +63,10 @@ class RAGPipeline:
             return self._blocked_response(input_result)
 
         query_embedding = self._embedding_client.embed_query(query)
-        sources = self._vector_store.search(
+        sources = self._retriever.retrieve(
+            query,
             query_embedding,
-            limit=self._top_k,
-            metadata_filters=metadata_filters,
-            score_threshold=self._score_threshold,
+            explicit_filters=metadata_filters,
         )
 
         if not sources:
