@@ -258,6 +258,8 @@ docker compose ps
 | UI       | http://localhost:7860      | Gradio web interface               |
 | Qdrant   | http://localhost:6333      | Vector database dashboard          |
 
+The compose file uses Qdrant `v1.17.1` to match the pinned `qdrant-client` version. A fresh named Docker volume is used for that upgraded server version so older local Qdrant storage created with earlier versions does not break container startup.
+
 To stop all services:
 
 ```bash
@@ -351,6 +353,44 @@ Without `--auto`, the script prints unknown name clusters as JSON for manual rev
 - `answer`: The generated response, grounded in the retrieved sources.
 - `sources`: The exact data chunks used to produce the answer, including full metadata and relevance scores.
 - `guardrails`: A transparency object describing what safety checks were performed and their results.
+- `retrieval_debug`: Reviewer-facing retrieval diagnostics including inferred filters, tried filter plans, candidate scores, and reranking decisions.
+
+Example `retrieval_debug` payload:
+
+```json
+{
+  "query": "Where can I buy Nike shoes?",
+  "explicit_filters": {},
+  "inferred_filters": {
+    "shop_name": "Nike",
+    "category": "Sports"
+  },
+  "merged_filters": {
+    "shop_name": "Nike",
+    "category": "Sports"
+  },
+  "filter_plans": [
+    {"shop_name": "Nike", "category": "Sports"},
+    {"shop_name": "Nike"},
+    {"category": "Sports"},
+    {}
+  ],
+  "candidates": [
+    {
+      "rank": 1,
+      "selected": true,
+      "chunk_id": "shop-0-summary",
+      "shop_name": "Nike",
+      "mall_name": "ICONSIAM",
+      "category": "Sports",
+      "vector_score": 0.4658,
+      "lexical_score": 0.95,
+      "metadata_boost": 0.32,
+      "hybrid_score": 0.9558
+    }
+  ]
+}
+```
 
 ### `GET /health` — Service health check
 
@@ -626,6 +666,14 @@ An admin panel for reviewing and approving name normalization suggestions:
 4. Approved mappings persist to `data/name_mappings.json` for future ingestion runs.
 
 Access the UI at **http://localhost:7860** after starting the services.
+
+The Chat tab now exposes a **Retrieval Debug** panel so reviewers can inspect:
+
+- inferred filters extracted from the user query,
+- the metadata filter plans tried against Qdrant,
+- candidate chunks returned by each plan,
+- lexical/vector scoring breakdowns,
+- which candidates survived reranking.
 
 ---
 

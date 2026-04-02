@@ -1,0 +1,44 @@
+[
+  {
+    "name": "thai_nike_location",
+    "query": "ร้าน Nike อยู่ที่ไหน",
+    "expected_in_scope": true,
+    "expected_filters": {
+      "shop_name": "Nike"
+    }
+  },
+  {
+    "name": "nike_shoes_product_intent",
+    "query": "Where can I buy Nike shoes?",
+    "expected_in_scope": true,
+    "expected_filters": {
+      "shop_name": "Nike",
+      "category": "Sports"
+    }
+  },
+  {
+    "name": "watch_product_intent",
+    "query": "Where can I buy a watch?",
+    "expected_in_scope": true,
+    "expected_filters": {
+      "category": "Jewelry"
+    }
+  },
+  {
+    "name": "apple_alias_query",
+    "query": "Where is applestore?",
+    "expected_in_scope": true,
+    "expected_filters": {
+      "shop_name": "Apple Store"
+    }
+  },
+  {
+    "name": "starbucks_time_query",
+    "query": "What time does Starbucks open in ICONSIAM?",
+    "expected_in_scope": true,
+    "expected_filters": {
+      "shop_name": "Starbucks",
+      "mall_name": "ICONSIAM"
+    }
+  }
+]
