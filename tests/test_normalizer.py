@@ -142,6 +142,4 @@ def test_openai_name_reviewer_parses_reviewed_clusters():
         ]
     )
 
-    assert reviewed == {
-        "ICONSIAM": ["Icon Siam", "icon-siam", "ICONSIAM"]
-    }
+    assert reviewed == {"ICONSIAM": ["Icon Siam", "icon-siam", "ICONSIAM"]}

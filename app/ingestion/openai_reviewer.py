@@ -131,9 +131,7 @@ class OpenAINameReviewer(NameReviewer):
             raise ValueError("Reviewer JSON must contain a 'clusters' list")
 
         known_variants = {
-            variant
-            for cluster in clusters
-            for variant in cluster.variants
+            variant for cluster in clusters for variant in cluster.variants
         }
         reviewed: dict[str, list[str]] = {}
 
