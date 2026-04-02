@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from app.guardrails.input_guard import InputGuard
+from app.guardrails.input_guard import InputGuard, OUT_OF_SCOPE_MESSAGE
 from app.guardrails.openai_moderation import OpenAIModerationClient
 from app.guardrails.output_guard import OutputGuard
 from app.retrieval.vector_store import SearchResult
@@ -29,6 +29,52 @@ def test_input_guard_blocks_out_of_scope_queries():
     guard = InputGuard()
 
     result = guard.evaluate("Write me a poem about the ocean")
+
+    assert result.allowed is False
+    assert result.in_scope is False
+    assert result.reason == OUT_OF_SCOPE_MESSAGE
+
+
+def test_input_guard_allows_shopping_intent_queries():
+    guard = InputGuard()
+
+    result = guard.evaluate("I want a T-shirt")
+
+    assert result.allowed is True
+    assert result.in_scope is True
+
+
+def test_input_guard_allows_thai_shopping_intent():
+    guard = InputGuard()
+
+    result = guard.evaluate("อยากได้ชุดลำลองใส่ไปเที่ยว")
+
+    assert result.allowed is True
+    assert result.in_scope is True
+
+
+def test_input_guard_llm_fallback_allows_ambiguous_in_scope_query():
+    class StubIntentClassifier:
+        def classify_intent(self, query: str) -> bool:
+            return True
+
+    guard = InputGuard(intent_classifier=StubIntentClassifier())
+
+    # No keyword match, but LLM says in-scope
+    result = guard.evaluate("มีอะไรน่าสนใจบ้าง")
+
+    assert result.allowed is True
+    assert result.in_scope is True
+
+
+def test_input_guard_llm_fallback_rejects_off_topic_query():
+    class StubIntentClassifier:
+        def classify_intent(self, query: str) -> bool:
+            return False
+
+    guard = InputGuard(intent_classifier=StubIntentClassifier())
+
+    result = guard.evaluate("What is the meaning of life?")
 
     assert result.allowed is False
     assert result.in_scope is False

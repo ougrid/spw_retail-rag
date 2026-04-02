@@ -10,7 +10,7 @@ from app.api.middleware import configure_app_middleware
 from app.api.routes import router
 from app.config import Settings, get_settings
 from app.generation.llm import LLMClient
-from app.guardrails.input_guard import InputGuard
+from app.guardrails.input_guard import InputGuard, LLMIntentClassifier
 from app.guardrails.openai_moderation import OpenAIModerationClient
 from app.guardrails.output_guard import OutputGuard
 from app.rag.pipeline import RAGPipeline
@@ -58,11 +58,15 @@ async def lifespan(app: FastAPI):
             candidate_multiplier=settings.hybrid_candidate_multiplier,
             minimum_hybrid_score=settings.hybrid_min_score,
         )
+        intent_classifier = LLMIntentClassifier(llm_client)
         app.state.pipeline = RAGPipeline(
             embedding_client=embedding_client,
             vector_store=vector_store,
             llm_client=llm_client,
-            input_guard=InputGuard(moderation_client=moderation_client),
+            input_guard=InputGuard(
+                moderation_client=moderation_client,
+                intent_classifier=intent_classifier,
+            ),
             output_guard=OutputGuard(),
             query_analyzer=query_analyzer,
             retriever=retriever,
