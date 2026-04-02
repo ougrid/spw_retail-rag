@@ -67,6 +67,7 @@ def test_pipeline_returns_blocked_response_for_out_of_scope_query():
 
     assert response.sources == []
     assert response.guardrails["input_in_scope"] is False
+    assert "shopping mall concierge" in response.answer
 
 
 def test_pipeline_returns_fallback_when_no_sources_are_found():

@@ -16,7 +16,11 @@ from app.retrieval.vector_store import SearchResult
 
 logger = structlog.get_logger(__name__)
 
-FALLBACK_ANSWER = "I do not have that information based on the retrieved context."
+FALLBACK_ANSWER = (
+    "I don't have that specific information in my records right now. "
+    "I can help you find shops, check opening hours, or suggest stores by category — "
+    "what would you like to know?"
+)
 
 
 @dataclass(frozen=True)

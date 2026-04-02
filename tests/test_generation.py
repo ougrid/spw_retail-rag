@@ -37,6 +37,7 @@ def test_build_messages_includes_system_prompt_and_query_context():
     messages = build_messages("Where is Nike?", _sample_sources())
 
     assert messages[0]["content"] == SYSTEM_PROMPT
+    assert "concierge" in SYSTEM_PROMPT.lower()
     assert messages[1]["content"]
     assert "Where is Nike?" in messages[1]["content"]
 
