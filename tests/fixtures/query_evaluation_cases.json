@@ -40,5 +40,21 @@
       "shop_name": "Starbucks",
       "mall_name": "ICONSIAM"
     }
+  },
+  {
+    "name": "thai_casual_outfit_query",
+    "query": "อยากได้ชุดลำลอง",
+    "expected_in_scope": true,
+    "expected_filters": {
+      "category": "Fashion"
+    }
+  },
+  {
+    "name": "thai_beach_outfit_query",
+    "query": "อยากได้ชุดใส่ไปเที่ยวทะเล",
+    "expected_in_scope": true,
+    "expected_filters": {
+      "category": "Fashion"
+    }
   }
 ]

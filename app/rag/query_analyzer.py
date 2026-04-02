@@ -26,8 +26,17 @@ PRODUCT_CATEGORY_KEYWORDS = {
         "athletic",
         "sport",
         "sports",
+        "รองเท้า",
     },
-    "Jewelry": {"watch", "watches", "jewelry", "jewellery", "luxury"},
+    "Jewelry": {
+        "watch",
+        "watches",
+        "jewelry",
+        "jewellery",
+        "luxury",
+        "นาฬิกา",
+        "เครื่องประดับ",
+    },
     "Electronics": {
         "electronics",
         "electronic",
@@ -39,12 +48,59 @@ PRODUCT_CATEGORY_KEYWORDS = {
         "laptops",
         "computer",
         "computers",
+        "อิเล็กทรอนิกส์",
+        "มือถือ",
+        "โทรศัพท์",
     },
-    "Beauty": {"beauty", "cosmetic", "cosmetics", "makeup", "skincare"},
-    "Cafe": {"cafe", "coffee", "pastry", "pastries", "drink", "drinks"},
-    "Books": {"book", "books", "magazine", "magazines", "read"},
-    "Supermarket": {"supermarket", "grocery", "groceries", "market"},
-    "Fashion": {"fashion", "clothes", "clothing", "apparel", "wear"},
+    "Beauty": {
+        "beauty",
+        "cosmetic",
+        "cosmetics",
+        "makeup",
+        "skincare",
+        "ความงาม",
+        "เครื่องสำอาง",
+    },
+    "Cafe": {
+        "cafe",
+        "coffee",
+        "pastry",
+        "pastries",
+        "drink",
+        "drinks",
+        "กาแฟ",
+        "คาเฟ่",
+    },
+    "Books": {"book", "books", "magazine", "magazines", "read", "หนังสือ"},
+    "Supermarket": {
+        "supermarket",
+        "grocery",
+        "groceries",
+        "market",
+        "ซูเปอร์มาร์เก็ต",
+        "ของกิน",
+    },
+    "Fashion": {
+        "fashion",
+        "clothes",
+        "clothing",
+        "apparel",
+        "wear",
+        "shirt",
+        "tshirt",
+        "t-shirt",
+        "tee",
+        "dress",
+        "outfit",
+        "casual",
+        "casual wear",
+        "beachwear",
+        "เสื้อ",
+        "เสื้อผ้า",
+        "ชุด",
+        "ลำลอง",
+        "แฟชั่น",
+    },
 }
 
 
@@ -138,9 +194,25 @@ class QueryAnalyzer:
 
     def _match_category(self, query: str) -> str | None:
         query_tokens = set(_TOKEN_PATTERN.findall(query.lower()))
+        normalized_query = _normalize_text(query)
         for category, keywords in self._category_keywords.items():
-            if query_tokens & keywords:
-                return category
+            for keyword in keywords:
+                normalized_keyword = _normalize_text(keyword)
+                if not normalized_keyword:
+                    continue
+
+                # Exact token match for single-token ASCII keywords keeps matching precise.
+                if (
+                    keyword.isascii()
+                    and " " not in keyword
+                    and "-" not in keyword
+                    and keyword in query_tokens
+                ):
+                    return category
+
+                # Phrase, hyphenated, and Thai keywords are matched against a normalized string.
+                if normalized_keyword in normalized_query:
+                    return category
         return None
 
 
