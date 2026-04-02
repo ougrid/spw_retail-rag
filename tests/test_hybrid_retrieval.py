@@ -70,13 +70,19 @@ def test_hybrid_retriever_uses_inferred_filters_and_reranks_candidates():
         top_k=2,
     )
 
-    results = retriever.retrieve("Where can I buy Nike shoes?", [0.1, 0.2])
+    retrieval = retriever.retrieve("Where can I buy Nike shoes?", [0.1, 0.2])
+    results = retrieval.sources
 
     assert [result.metadata["shop_name"] for result in results] == ["Nike"]
     assert vector_store.calls[0]["metadata_filters"] == {
         "shop_name": "Nike",
         "category": "Sports",
     }
+    assert retrieval.debug["inferred_filters"] == {
+        "shop_name": "Nike",
+        "category": "Sports",
+    }
+    assert retrieval.debug["candidates"][0]["selected"] is True
 
 
 def test_hybrid_retriever_falls_back_to_less_restrictive_filter_plan():
@@ -100,7 +106,8 @@ def test_hybrid_retriever_falls_back_to_less_restrictive_filter_plan():
         top_k=1,
     )
 
-    results = retriever.retrieve("Where can I buy Nike shoes?", [0.1, 0.2])
+    retrieval = retriever.retrieve("Where can I buy Nike shoes?", [0.1, 0.2])
+    results = retrieval.sources
 
     assert [result.metadata["shop_name"] for result in results] == ["Nike"]
     assert vector_store.calls[0]["metadata_filters"] == {
@@ -127,6 +134,8 @@ def test_hybrid_retriever_applies_minimum_score_cutoff():
         minimum_hybrid_score=0.2,
     )
 
-    results = retriever.retrieve("Where can I buy shoes?", [0.1, 0.2])
+    retrieval = retriever.retrieve("Where can I buy shoes?", [0.1, 0.2])
+    results = retrieval.sources
 
     assert results == []
+    assert retrieval.debug["candidate_count"] == 1

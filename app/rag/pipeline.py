@@ -24,6 +24,7 @@ class RAGResponse:
     answer: str
     sources: list[dict[str, Any]]
     guardrails: dict[str, Any]
+    retrieval_debug: dict[str, Any] | None = None
 
 
 class RAGPipeline:
@@ -63,11 +64,12 @@ class RAGPipeline:
             return self._blocked_response(input_result)
 
         query_embedding = self._embedding_client.embed_query(query)
-        sources = self._retriever.retrieve(
+        retrieval_result = self._retriever.retrieve(
             query,
             query_embedding,
             explicit_filters=metadata_filters,
         )
+        sources = retrieval_result.sources
 
         if not sources:
             output_result = self._output_guard.evaluate(FALLBACK_ANSWER, [])
@@ -76,6 +78,7 @@ class RAGPipeline:
                 sources=[],
                 input_result=input_result,
                 output_result=output_result,
+                retrieval_debug=retrieval_result.debug,
             )
 
         messages = build_messages(query, sources)
@@ -90,6 +93,7 @@ class RAGPipeline:
             sources=sources,
             input_result=input_result,
             output_result=output_result,
+            retrieval_debug=retrieval_result.debug,
         )
         logger.info(
             "rag_pipeline_completed",
@@ -110,6 +114,7 @@ class RAGPipeline:
                 "confidence": "low",
                 "reason": input_result.reason,
             },
+            retrieval_debug=None,
         )
 
     def _response(
@@ -118,6 +123,7 @@ class RAGPipeline:
         sources: list[SearchResult],
         input_result: InputGuardResult,
         output_result: OutputGuardResult,
+        retrieval_debug: dict[str, Any] | None = None,
     ) -> RAGResponse:
         return RAGResponse(
             answer=answer,
@@ -137,4 +143,5 @@ class RAGPipeline:
                 "confidence": output_result.confidence,
                 "reason": output_result.reason,
             },
+            retrieval_debug=retrieval_debug,
         )

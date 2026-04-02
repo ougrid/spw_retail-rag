@@ -59,6 +59,7 @@ def chat_with_api(message, history, api_base_url):
         payload["answer"],
         json.dumps(payload["guardrails"], indent=2),
         sources_markdown,
+        json.dumps(payload.get("retrieval_debug") or {}, indent=2, ensure_ascii=False),
     )
 
 
@@ -135,12 +136,19 @@ with gr.Blocks(title="Retail RAG Assistant") as demo:
         answer_box = gr.Textbox(label="Latest Answer", lines=4)
         guardrails_json = gr.Code(label="Guardrails", language="json")
         sources_markdown = gr.Markdown(label="Sources")
+        retrieval_debug_json = gr.Code(label="Retrieval Debug", language="json")
         send_button = gr.Button("Send")
 
         send_button.click(
             chat_with_api,
             inputs=[message, transcript, api_base_url],
-            outputs=[transcript, answer_box, guardrails_json, sources_markdown],
+            outputs=[
+                transcript,
+                answer_box,
+                guardrails_json,
+                sources_markdown,
+                retrieval_debug_json,
+            ],
         )
 
     with gr.Tab("Normalization Review"):

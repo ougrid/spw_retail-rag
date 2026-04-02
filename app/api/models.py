@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -36,6 +38,7 @@ class ChatResponse(BaseModel):
     answer: str
     sources: list[SourceResponse]
     guardrails: GuardrailsResponse
+    retrieval_debug: dict[str, Any] | None = None
 
 
 class HealthResponse(BaseModel):

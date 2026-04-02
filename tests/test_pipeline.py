@@ -25,6 +25,19 @@ class StubLLMClient:
         return self.answer_text
 
 
+class StubRetriever:
+    def __init__(self, sources, debug=None):
+        self.sources = sources
+        self.debug = debug or {"inferred_filters": {}, "candidates": []}
+
+    def retrieve(self, query, query_vector, explicit_filters=None):
+        return type(
+            "HybridResult",
+            (),
+            {"sources": self.sources, "debug": self.debug},
+        )()
+
+
 def _sample_source() -> SearchResult:
     return SearchResult(
         chunk_id="shop-1-summary",
@@ -63,12 +76,14 @@ def test_pipeline_returns_fallback_when_no_sources_are_found():
         llm_client=StubLLMClient("unused"),
         input_guard=InputGuard(),
         output_guard=OutputGuard(),
+        retriever=StubRetriever([], debug={"inferred_filters": {"mall_name": "ICONSIAM"}, "candidates": []}),
     )
 
     response = pipeline.answer("What sports shops are in ICONSIAM?")
 
     assert response.answer == FALLBACK_ANSWER
     assert response.guardrails["confidence"] == "low"
+    assert response.retrieval_debug["inferred_filters"] == {"mall_name": "ICONSIAM"}
 
 
 def test_pipeline_returns_grounded_answer_with_sources():
@@ -78,6 +93,7 @@ def test_pipeline_returns_grounded_answer_with_sources():
         llm_client=StubLLMClient("Nike is on floor 1 of ICONSIAM and opens at 10:00."),
         input_guard=InputGuard(),
         output_guard=OutputGuard(),
+        retriever=StubRetriever([_sample_source()], debug={"inferred_filters": {"shop_name": "Nike"}, "candidates": [{"selected": True}]})
     )
 
     response = pipeline.answer("Where is Nike in ICONSIAM?")
@@ -85,6 +101,7 @@ def test_pipeline_returns_grounded_answer_with_sources():
     assert response.answer == "Nike is on floor 1 of ICONSIAM and opens at 10:00."
     assert response.sources[0]["shop_name"] == "Nike"
     assert response.guardrails["grounding_verified"] is True
+    assert response.retrieval_debug["inferred_filters"] == {"shop_name": "Nike"}
 
 
 def test_pipeline_replaces_ungrounded_answer_with_fallback():
@@ -94,6 +111,7 @@ def test_pipeline_replaces_ungrounded_answer_with_fallback():
         llm_client=StubLLMClient("Nike opens at 09:00."),
         input_guard=InputGuard(),
         output_guard=OutputGuard(),
+        retriever=StubRetriever([_sample_source()], debug={"inferred_filters": {"shop_name": "Nike"}, "candidates": [{"selected": True}]})
     )
 
     response = pipeline.answer("What time does Nike open?")

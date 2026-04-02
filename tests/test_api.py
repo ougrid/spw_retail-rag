@@ -30,6 +30,10 @@ class StubPipeline:
                 "confidence": "high",
                 "reason": "ok",
             },
+            retrieval_debug={
+                "inferred_filters": {"shop_name": "Nike"},
+                "candidates": [{"chunk_id": "shop-1-summary", "selected": True}],
+            },
         )
 
 
@@ -47,6 +51,7 @@ def test_chat_endpoint_returns_answer_sources_and_guardrails():
     assert body["answer"] == "Nike is on floor 1 of ICONSIAM."
     assert body["sources"][0]["shop_name"] == "Nike"
     assert body["guardrails"]["grounding_verified"] is True
+    assert body["retrieval_debug"]["inferred_filters"]["shop_name"] == "Nike"
 
 
 def test_health_endpoint_returns_status_and_checks():

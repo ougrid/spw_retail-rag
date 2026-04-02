@@ -63,6 +63,14 @@ def _tokenize(value: str) -> set[str]:
 class RankedResult:
     result: SearchResult
     hybrid_score: float
+    lexical_score: float
+    metadata_boost: float
+
+
+@dataclass(frozen=True)
+class HybridRetrievalResult:
+    sources: list[SearchResult]
+    debug: dict[str, object]
 
 
 class HybridRetriever:
@@ -91,23 +99,40 @@ class HybridRetriever:
         query: str,
         query_vector: list[float],
         explicit_filters: dict[str, str] | None = None,
-    ) -> list[SearchResult]:
+    ) -> HybridRetrievalResult:
         analysis = self._query_analyzer.analyze(query, explicit_filters)
-        candidates = self._collect_candidates(query_vector, analysis, explicit_filters)
+        filter_plans = self._build_filter_plans(analysis, explicit_filters or {})
+        candidates, filter_plan_results, candidate_limit = self._collect_candidates(
+            query_vector,
+            analysis,
+            explicit_filters,
+            filter_plans,
+        )
         if not candidates:
             logger.info("hybrid_retrieval_no_candidates", query=query)
-            return []
+            return HybridRetrievalResult(
+                sources=[],
+                debug={
+                    "query": query,
+                    "explicit_filters": explicit_filters or {},
+                    "inferred_filters": analysis.inferred_filters,
+                    "merged_filters": analysis.metadata_filters,
+                    "filter_plans": filter_plans,
+                    "filter_plan_results": filter_plan_results,
+                    "candidate_limit": candidate_limit,
+                    "candidate_count": 0,
+                    "returned_count": 0,
+                    "candidates": [],
+                },
+            )
 
         ranked = sorted(
             (
-                RankedResult(
+                self._rank_result(
+                    query=query,
                     result=result,
-                    hybrid_score=self._hybrid_score(
-                        query=query,
-                        result=result,
-                        analysis=analysis,
-                        explicit_filters=explicit_filters or {},
-                    ),
+                    analysis=analysis,
+                    explicit_filters=explicit_filters or {},
                 )
                 for result in candidates.values()
             ),
@@ -129,23 +154,71 @@ class HybridRetriever:
             inferred_filters=analysis.inferred_filters,
             explicit_filters=explicit_filters or {},
         )
-        return filtered
+        selected_ids = {result.chunk_id for result in filtered}
+        debug_candidates = [
+            {
+                "rank": index + 1,
+                "selected": ranked_item.result.chunk_id in selected_ids,
+                "chunk_id": ranked_item.result.chunk_id,
+                "shop_name": ranked_item.result.metadata.get("shop_name"),
+                "mall_name": ranked_item.result.metadata.get("mall_name"),
+                "category": ranked_item.result.metadata.get("category"),
+                "vector_score": ranked_item.result.score,
+                "lexical_score": ranked_item.lexical_score,
+                "metadata_boost": ranked_item.metadata_boost,
+                "hybrid_score": ranked_item.hybrid_score,
+            }
+            for index, ranked_item in enumerate(ranked)
+        ]
+        return HybridRetrievalResult(
+            sources=filtered,
+            debug={
+                "query": query,
+                "explicit_filters": explicit_filters or {},
+                "inferred_filters": analysis.inferred_filters,
+                "merged_filters": analysis.metadata_filters,
+                "filter_plans": filter_plans,
+                "filter_plan_results": filter_plan_results,
+                "candidate_limit": candidate_limit,
+                "candidate_count": len(candidates),
+                "returned_count": len(filtered),
+                "candidates": debug_candidates,
+            },
+        )
 
     def _collect_candidates(
         self,
         query_vector: list[float],
         analysis: QueryAnalysis,
         explicit_filters: dict[str, str] | None,
-    ) -> dict[str, SearchResult]:
+        filter_plans: list[dict[str, str]],
+    ) -> tuple[dict[str, SearchResult], list[dict[str, object]], int]:
         candidate_limit = max(self._top_k * self._candidate_multiplier, self._top_k)
         candidates: dict[str, SearchResult] = {}
+        filter_plan_results: list[dict[str, object]] = []
 
-        for filters in self._build_filter_plans(analysis, explicit_filters or {}):
+        for filters in filter_plans:
             response = self._vector_store.search(
                 query_vector,
                 limit=candidate_limit,
                 metadata_filters=filters or None,
                 score_threshold=None,
+            )
+            filter_plan_results.append(
+                {
+                    "filters": filters,
+                    "result_count": len(response),
+                    "results": [
+                        {
+                            "chunk_id": result.chunk_id,
+                            "shop_name": result.metadata.get("shop_name"),
+                            "mall_name": result.metadata.get("mall_name"),
+                            "category": result.metadata.get("category"),
+                            "vector_score": result.score,
+                        }
+                        for result in response
+                    ],
+                }
             )
             for result in response:
                 existing = candidates.get(result.chunk_id)
@@ -155,7 +228,7 @@ class HybridRetriever:
                 break
             if len(candidates) >= candidate_limit:
                 break
-        return candidates
+        return candidates, filter_plan_results, candidate_limit
 
     def _build_filter_plans(
         self,
@@ -199,13 +272,13 @@ class HybridRetriever:
 
         return plans
 
-    def _hybrid_score(
+    def _rank_result(
         self,
         query: str,
         result: SearchResult,
         analysis: QueryAnalysis,
         explicit_filters: dict[str, str],
-    ) -> float:
+    ) -> RankedResult:
         query_tokens = _tokenize(query)
         metadata_text = " ".join(str(value) for value in result.metadata.values())
         candidate_tokens = _tokenize(f"{result.text} {metadata_text}")
@@ -237,8 +310,14 @@ class HybridRetriever:
         metadata_boost += explicit_match_count * 0.12
 
         bounded_lexical = min(1.0, lexical_score)
-        return (
+        hybrid_score = (
             self._vector_weight * max(result.score, 0.0)
             + self._lexical_weight * bounded_lexical
             + metadata_boost
+        )
+        return RankedResult(
+            result=result,
+            hybrid_score=hybrid_score,
+            lexical_score=bounded_lexical,
+            metadata_boost=metadata_boost,
         )
