@@ -18,6 +18,7 @@ from app.rag.query_analyzer import QueryAnalyzer
 from app.retrieval.embeddings import EmbeddingClient
 from app.retrieval.hybrid import HybridRetriever
 from app.retrieval.vector_store import QdrantVectorStore
+from app.session_memory import SessionMemoryStore
 
 
 @asynccontextmanager
@@ -73,6 +74,7 @@ async def lifespan(app: FastAPI):
             top_k=settings.retrieval_top_k,
             score_threshold=settings.retrieval_score_threshold,
         )
+        app.state.session_store = SessionMemoryStore()
         app.state.health_checks = {
             "qdrant": vector_store.health_check,
             "openai": llm_client.health_check,
@@ -84,6 +86,7 @@ def create_app(
     settings: Settings | None = None,
     pipeline: RAGPipeline | None = None,
     health_checks: dict[str, callable] | None = None,
+    session_store: SessionMemoryStore | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Retail RAG API", version="0.1.0", lifespan=lifespan)
     configure_app_middleware(app)
@@ -93,6 +96,10 @@ def create_app(
         app.state.pipeline = pipeline
     if health_checks is not None:
         app.state.health_checks = health_checks
+    if session_store is not None:
+        app.state.session_store = session_store
+    if not hasattr(app.state, "session_store"):
+        app.state.session_store = SessionMemoryStore()
 
     return app
 

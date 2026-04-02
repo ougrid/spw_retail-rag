@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 class ChatRequest(BaseModel):
     query: str = Field(min_length=1)
     metadata_filters: dict[str, str] | None = None
+    session_id: str | None = None
 
 
 class SourceResponse(BaseModel):
@@ -39,6 +40,7 @@ class ChatResponse(BaseModel):
     sources: list[SourceResponse]
     guardrails: GuardrailsResponse
     retrieval_debug: dict[str, Any] | None = None
+    session_id: str
 
 
 class HealthResponse(BaseModel):

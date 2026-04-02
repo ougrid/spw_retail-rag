@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from uuid import uuid4
+
 from fastapi import APIRouter, Request
 
 from app.api.models import ChatRequest, ChatResponse, HealthResponse
@@ -12,8 +14,17 @@ router = APIRouter()
 @router.post("/chat", response_model=ChatResponse)
 def chat(request: Request, payload: ChatRequest) -> ChatResponse:
     pipeline = request.app.state.pipeline
-    result = pipeline.answer(payload.query, metadata_filters=payload.metadata_filters)
-    return ChatResponse.model_validate(result.__dict__)
+    session_store = request.app.state.session_store
+    session_id = payload.session_id or str(uuid4())
+    history = session_store.get_history(session_id)
+    result = pipeline.answer(
+        payload.query,
+        metadata_filters=payload.metadata_filters,
+        conversation_history=history,
+    )
+    session_store.append_exchange(session_id, payload.query, result.answer)
+    response_payload = {**result.__dict__, "session_id": session_id}
+    return ChatResponse.model_validate(response_payload)
 
 
 @router.get("/health", response_model=HealthResponse)
