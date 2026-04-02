@@ -1,313 +1,673 @@
 # Retail RAG Chatbot
 
-Production-oriented Retrieval-Augmented Generation chatbot for answering questions about mall shops and tenants from the provided `shops.csv` dataset.
+A production-ready Retrieval-Augmented Generation (RAG) chatbot that answers user questions about mall shops and tenants. Built with FastAPI, Qdrant, and OpenAI, it demonstrates a complete pipeline: data ingestion with intelligent cleaning and normalization, vector-based semantic retrieval, grounded LLM generation with multi-layer guardrails, transparent source attribution, and a Gradio-based user interface — all containerized with Docker.
 
-## Features
+---
 
-- FastAPI backend with `POST /chat` and `GET /health`
-- Qdrant vector store with metadata-aware retrieval
-- OpenAI embeddings and answer generation
-- Intelligent mall-name normalization pipeline with persisted mappings
-- Multi-layer guardrails for scope, grounding, and confidence
-- Source transparency: every answer returns the chunks used to answer
-- Gradio UI with chat mode and normalization review mode
-- Docker and docker-compose support
-- Unit tests for ingestion, retrieval, generation, guardrails, pipeline, and API layers
+## Table of Contents
 
-## Tech Stack
+- [Retail RAG Chatbot](#retail-rag-chatbot)
+	- [Table of Contents](#table-of-contents)
+	- [Architecture Overview](#architecture-overview)
+	- [Tech Stack](#tech-stack)
+		- [Why Qdrant over alternatives](#why-qdrant-over-alternatives)
+	- [Project Structure](#project-structure)
+	- [Setup Instructions](#setup-instructions)
+		- [Prerequisites](#prerequisites)
+		- [API Key Configuration](#api-key-configuration)
+		- [Local Development Setup](#local-development-setup)
+		- [Docker Setup (Recommended)](#docker-setup-recommended)
+	- [Running the Application](#running-the-application)
+		- [Quick smoke test](#quick-smoke-test)
+		- [Ingestion script flags](#ingestion-script-flags)
+	- [API Reference](#api-reference)
+		- [`POST /chat` — Ask a question](#post-chat--ask-a-question)
+		- [`GET /health` — Service health check](#get-health--service-health-check)
+		- [Request tracking](#request-tracking)
+		- [Auto-generated docs](#auto-generated-docs)
+	- [Data Processing Pipeline](#data-processing-pipeline)
+		- [Source Data](#source-data)
+		- [Data Cleaning](#data-cleaning)
+		- [Intelligent Name Normalization](#intelligent-name-normalization)
+		- [Chunking Strategy](#chunking-strategy)
+		- [Embedding Strategy](#embedding-strategy)
+	- [RAG Pipeline](#rag-pipeline)
+		- [Retrieval](#retrieval)
+		- [Prompt Engineering](#prompt-engineering)
+		- [Generation](#generation)
+		- [Guardrails](#guardrails)
+			- [Layer 1 — Input guardrails (`app/guardrails/input_guard.py`)](#layer-1--input-guardrails-appguardrailsinput_guardpy)
+			- [Layer 2 — Prompt-level guardrails](#layer-2--prompt-level-guardrails)
+			- [Layer 3 — Output guardrails (`app/guardrails/output_guard.py`)](#layer-3--output-guardrails-appguardrailsoutput_guardpy)
+			- [Layer 4 — Source transparency](#layer-4--source-transparency)
+	- [Gradio UI](#gradio-ui)
+		- [Chat Tab](#chat-tab)
+		- [Normalization Review Tab (Admin)](#normalization-review-tab-admin)
+	- [Testing](#testing)
+		- [Test coverage by module](#test-coverage-by-module)
+	- [Configuration Reference](#configuration-reference)
 
-- Python 3.11+
-- FastAPI
-- Qdrant
-- OpenAI API
-- sentence-transformers
-- Gradio
-- pytest
-
-## Why Qdrant
-
-Qdrant was chosen as the vector database because it gives the best balance of production-readiness and operational simplicity for this assignment.
-
-- It is a full database rather than only an indexing library.
-- It supports payload-based filtering, which is important for combining semantic search with filters like `mall_name`, `category`, and `floor`.
-- It is easy to run locally and in Docker.
-- It scales beyond the current toy dataset without changing the architecture.
-- Its Python client is straightforward and integrates well with a clean service layer.
+---
 
 ## Architecture Overview
 
-```text
-shops.csv
-	-> loader
-	-> cleaner
-	-> intelligent normalizer
-	-> chunker
-	-> OpenAI embeddings
-	-> Qdrant
+The system is split into two main flows — **ingestion** (offline, one-time) and **query** (online, per-request):
 
-User query
-	-> input guardrails
-	-> query embedding
-	-> Qdrant retrieval
-	-> prompt builder
-	-> OpenAI generation
-	-> output guardrails
-	-> answer + sources + guardrail metadata
 ```
+                          ┌─────────────────────────────────────┐
+                          │         INGESTION FLOW              │
+                          │                                     │
+  shops.csv ──► Loader ──► Cleaner ──► Normalizer ──► Chunker  │
+                          │                    │                │
+                          │          name_mappings.json         │
+                          │                    │                │
+                          │              Embedder               │
+                          │                    │                │
+                          │              Qdrant                 │
+                          └─────────────────────────────────────┘
+
+                          ┌─────────────────────────────────────┐
+                          │           QUERY FLOW                │
+                          │                                     │
+  User Query ──► Input Guardrails ──► Embed Query               │
+                          │                │                    │
+                          │          Qdrant Search              │
+                          │          (semantic + filter)        │
+                          │                │                    │
+                          │          Prompt Builder             │
+                          │          (system + context + query) │
+                          │                │                    │
+                          │          OpenAI Generation          │
+                          │                │                    │
+                          │          Output Guardrails          │
+                          │          (grounding + confidence)   │
+                          │                │                    │
+                          │          Answer + Sources +         │
+                          │          Guardrail Metadata         │
+                          └─────────────────────────────────────┘
+```
+
+Every response includes the source chunks used to generate the answer, so users can verify information themselves.
+
+---
+
+## Tech Stack
+
+| Component       | Choice                                    | Rationale                                                                                         |
+|-----------------|-------------------------------------------|---------------------------------------------------------------------------------------------------|
+| Language        | Python 3.11+                              | Industry standard for AI/ML workloads                                                             |
+| API Framework   | FastAPI                                   | Async, auto-generated OpenAPI docs, Pydantic-native request/response validation                   |
+| Vector DB       | **Qdrant**                                | Production-grade (Rust), payload-based filtering, single-container deployment, scales to millions  |
+| Embeddings      | OpenAI `text-embedding-3-small`           | High quality, cost-effective, 1536 dimensions                                                     |
+| Local Embeddings| `sentence-transformers/all-MiniLM-L6-v2`  | Used only for name normalization clustering — avoids API cost for internal preprocessing           |
+| LLM             | OpenAI `gpt-4o-mini`                      | Strong reasoning with low cost, well-suited for grounded Q&A                                      |
+| GUI             | Gradio                                    | Quick to build, built-in chat UI, admin review panel                                              |
+| Testing         | pytest                                    | Standard Python testing with async support                                                        |
+| Logging         | structlog                                 | Structured JSON logging with request correlation IDs                                              |
+| Config          | pydantic-settings                         | Type-safe, validated configuration from environment variables and `.env` files                     |
+| Containers      | Docker + docker-compose                   | Reproducible multi-service deployment                                                             |
+
+### Why Qdrant over alternatives
+
+1. **Production-grade architecture** — Written in Rust with REST + gRPC APIs. Unlike ChromaDB (prototyping-focused) or FAISS (a library, not a DB), Qdrant is a full database with persistence, health checks, and first-class filtering.
+2. **Payload-based filtering** — Queries like "sports shops in Siam Center" need combined semantic search + metadata filters on `mall_name` and `category`. Qdrant supports rich filter expressions natively alongside vector similarity.
+3. **Operational simplicity** — Single Docker container, no Kubernetes requirement (unlike distributed Milvus). Fits naturally into the Docker Compose stack.
+4. **Scalability** — HNSW indexing, sharding, and replication mean the architecture does not need to change if the dataset grows from 12 to millions of records.
+
+---
 
 ## Project Structure
 
-```text
-app/
-	api/           FastAPI models, routes, middleware
-	generation/    OpenAI chat wrapper and prompt builders
-	guardrails/    Input and output validation
-	ingestion/     Loader, cleaner, normalizer, chunker
-	rag/           End-to-end RAG orchestration
-	retrieval/     Embedding client and Qdrant wrapper
-data/
-	shops.csv
-	name_mappings.json
-scripts/
-	ingest.py
-tests/
-ui/
-	gradio_app.py
+```
+spw_retail-rag/
+├── app/
+│   ├── config.py              # pydantic-settings configuration (all env vars)
+│   ├── main.py                # FastAPI app factory with async lifespan
+│   ├── api/
+│   │   ├── middleware.py      # X-Request-ID tracking, global error handler
+│   │   ├── models.py         # Pydantic request/response schemas
+│   │   └── routes.py         # POST /chat, GET /health
+│   ├── generation/
+│   │   ├── llm.py            # OpenAI chat completions wrapper with retry logic
+│   │   └── prompts.py        # System prompt, context builder, message assembly
+│   ├── guardrails/
+│   │   ├── input_guard.py    # Content moderation + topical scope check
+│   │   └── output_guard.py   # Grounding verification + confidence scoring
+│   ├── ingestion/
+│   │   ├── loader.py         # CSV loading with column normalization
+│   │   ├── cleaner.py        # Whitespace, time format, missing value handling
+│   │   ├── normalizer.py     # Embedding-based clustering + LLM review pipeline
+│   │   └── chunker.py        # Single and hierarchical chunking strategies
+│   ├── rag/
+│   │   └── pipeline.py       # End-to-end RAG orchestration
+│   └── retrieval/
+│       ├── embeddings.py     # OpenAI embedding client
+│       └── vector_store.py   # Qdrant wrapper (upsert, search, health)
+├── data/
+│   ├── shops.csv             # Source dataset (12 shops across 3 malls)
+│   └── name_mappings.json    # Persisted normalization mappings
+├── scripts/
+│   └── ingest.py             # CLI ingestion script (--auto, --recreate)
+├── tests/
+│   ├── test_api.py           # API endpoint and middleware tests
+│   ├── test_chunker.py       # Chunking strategy tests
+│   ├── test_cleaner.py       # Data cleaning and time normalization tests
+│   ├── test_generation.py    # LLM wrapper and prompt builder tests
+│   ├── test_guardrails.py    # Input and output guardrail tests
+│   ├── test_normalizer.py    # Normalization clustering and mapping tests
+│   ├── test_pipeline.py      # End-to-end RAG pipeline tests
+│   └── test_vector_store.py  # Qdrant operations and embedding tests
+├── ui/
+│   └── gradio_app.py         # Gradio chat UI + normalization review panel
+├── .env.example              # All configuration variables with defaults
+├── Dockerfile                # Python 3.11 slim image, multi-service capable
+├── docker-compose.yml        # Qdrant + API + UI + ingestion services
+├── requirements.txt          # Pinned dependency ranges
+└── README.md
 ```
 
-## Setup
+---
 
-### 1. Create a virtual environment
+## Setup Instructions
+
+### Prerequisites
+
+- **Python 3.11+** (for local development)
+- **Docker** and **Docker Compose** (for containerized deployment)
+- **OpenAI API key** with access to `text-embedding-3-small` and `gpt-4o-mini`
+
+### API Key Configuration
+
+1. Copy the example environment file:
+
+   ```bash
+   cp .env.example .env
+   ```
+
+2. Open `.env` and set your OpenAI API key:
+
+   ```env
+   OPENAI_API_KEY=sk-your-actual-api-key-here
+   ```
+
+   All other variables have sensible defaults and can be left as-is for a standard setup. See the [Configuration Reference](#configuration-reference) for the full list.
+
+### Local Development Setup
 
 ```bash
+# 1. Create and activate a virtual environment
 python -m venv .venv
+
+# On Windows:
 .venv\Scripts\activate
-```
+# On macOS/Linux:
+source .venv/bin/activate
 
-### 2. Install dependencies
-
-```bash
+# 2. Install dependencies
 pip install -r requirements.txt
-```
 
-### 3. Configure environment variables
+# 3. Configure environment (see API Key Configuration above)
+cp .env.example .env
+# Edit .env and set OPENAI_API_KEY
 
-Create `.env` from `.env.example` and fill in the required values:
+# 4. Start Qdrant (requires Docker)
+docker run -d -p 6333:6333 -p 6334:6334 qdrant/qdrant:v1.13.6
 
-```env
-OPENAI_API_KEY=...
-QDRANT_HOST=localhost
-QDRANT_PORT=6333
-QDRANT_COLLECTION_NAME=mall_shops
-EMBEDDING_MODEL=text-embedding-3-small
-LLM_MODEL=gpt-4o-mini
-```
-
-### 4. Start Qdrant
-
-If you have Docker:
-
-```bash
-docker run -p 6333:6333 qdrant/qdrant:v1.13.6
-```
-
-### 5. Run ingestion
-
-```bash
+# 5. Run data ingestion
 python scripts/ingest.py --auto --recreate
-```
 
-### 6. Run the API
-
-```bash
+# 6. Start the API server
 uvicorn app.main:app --reload
-```
 
-### 7. Run the Gradio UI
-
-```bash
+# 7. (Optional) Start the Gradio UI in a separate terminal
 python ui/gradio_app.py
 ```
 
-## Docker Usage
+The API will be available at `http://localhost:8000` and the Gradio UI at `http://localhost:7860`.
 
-### Start API, UI, and Qdrant
+### Docker Setup (Recommended)
 
-```bash
-docker compose up --build api ui qdrant
-```
-
-### Run the one-off ingestion job
+Docker Compose manages all services — no local Python environment needed.
 
 ```bash
+# 1. Configure environment
+cp .env.example .env
+# Edit .env and set OPENAI_API_KEY
+
+# 2. Build and start all services (Qdrant, API, UI)
+docker compose up --build -d
+
+# 3. Run the one-off ingestion job
 docker compose --profile ingest run --rm ingest
+
+# 4. Verify everything is running
+docker compose ps
 ```
 
-## API Usage
+| Service  | URL                        | Purpose                            |
+|----------|----------------------------|------------------------------------|
+| API      | http://localhost:8000      | FastAPI backend (chat + health)    |
+| UI       | http://localhost:7860      | Gradio web interface               |
+| Qdrant   | http://localhost:6333      | Vector database dashboard          |
 
-### Chat Request
+To stop all services:
 
-`POST /chat`
+```bash
+docker compose down
+```
 
-Request:
+To stop and remove stored vector data:
+
+```bash
+docker compose down -v
+```
+
+---
+
+## Running the Application
+
+### Quick smoke test
+
+After setup, verify the system works end-to-end:
+
+```bash
+# Health check — should return {"status":"ok","checks":{"qdrant":true,"openai":true}}
+curl http://localhost:8000/health
+
+# Chat query
+curl -X POST http://localhost:8000/chat \
+  -H "Content-Type: application/json" \
+  -d '{"query": "Where is Nike?"}'
+```
+
+### Ingestion script flags
+
+| Flag          | Effect                                                                 |
+|---------------|------------------------------------------------------------------------|
+| `--auto`      | Skip human review of normalization — auto-approve all suggested mappings |
+| `--recreate`  | Drop and recreate the Qdrant collection before upserting               |
+
+Without `--auto`, the script prints unknown name clusters as JSON for manual review before proceeding.
+
+---
+
+## API Reference
+
+### `POST /chat` — Ask a question
+
+**Request body:**
 
 ```json
 {
-	"query": "Where is Nike in ICONSIAM?"
+  "query": "What sports shops are in ICONSIAM?",
+  "metadata_filters": {
+    "mall_name": "ICONSIAM",
+    "category": "Sports"
+  }
 }
 ```
 
-Response:
+- `query` (string, required): The user's natural-language question. Minimum 1 character.
+- `metadata_filters` (object, optional): Key-value pairs to filter retrieval results by metadata fields (`mall_name`, `category`, `floor`, etc.).
+
+**Response body:**
 
 ```json
 {
-	"answer": "Nike is on floor 1 of ICONSIAM and opens at 10:00.",
-	"sources": [
-		{
-			"chunk_id": "shop-1-summary",
-			"chunk_text": "Nike is a Sports shop located on floor 1 of ICONSIAM. Athletic footwear and apparel. Open from 10:00 to 22:00.",
-			"relevance_score": 0.92,
-			"shop_name": "Nike",
-			"mall_name": "ICONSIAM",
-			"floor": "1",
-			"category": "Sports",
-			"open_time": "10:00",
-			"close_time": "22:00",
-			"chunk_type": "summary",
-			"parent_chunk_id": ""
-		}
-	],
-	"guardrails": {
-		"input_flagged": false,
-		"input_in_scope": true,
-		"grounding_verified": true,
-		"confidence": "high",
-		"reason": "ok"
-	}
+  "answer": "Nike is a Sports shop located on floor 1 of ICONSIAM, offering athletic footwear and apparel. It's open from 10:00 to 22:00.",
+  "sources": [
+    {
+      "chunk_id": "shop-1-summary",
+      "chunk_text": "Nike is a Sports shop located on floor 1 of ICONSIAM. Athletic footwear and apparel. Open from 10:00 to 22:00.",
+      "relevance_score": 0.92,
+      "shop_name": "Nike",
+      "mall_name": "ICONSIAM",
+      "floor": "1",
+      "category": "Sports",
+      "open_time": "10:00",
+      "close_time": "22:00",
+      "chunk_type": "summary",
+      "parent_chunk_id": ""
+    }
+  ],
+  "guardrails": {
+    "input_flagged": false,
+    "input_in_scope": true,
+    "grounding_verified": true,
+    "confidence": "high",
+    "reason": "ok"
+  }
 }
 ```
 
-### Health Check
+- `answer`: The generated response, grounded in the retrieved sources.
+- `sources`: The exact data chunks used to produce the answer, including full metadata and relevance scores.
+- `guardrails`: A transparency object describing what safety checks were performed and their results.
 
-`GET /health`
+### `GET /health` — Service health check
 
-Response:
+**Response:**
 
 ```json
 {
-	"status": "ok",
-	"checks": {
-		"qdrant": true,
-		"openai": true
-	}
+  "status": "ok",
+  "checks": {
+    "qdrant": true,
+    "openai": true
+  }
 }
 ```
 
-## Data Cleaning Strategy
+Returns `"degraded"` if either dependency is unreachable.
 
-The ingestion cleaner handles the obvious inconsistencies in the supplied CSV.
+### Request tracking
 
-- Normalizes whitespace across text columns
-- Ensures the expected schema is present
-- Fills missing descriptions with a safe default message
-- Standardizes time formats into `HH:MM` 24-hour format
+Every response includes an `X-Request-ID` header (UUID). If a client sends this header, the server echoes it back; otherwise the server generates one. This ID appears in structured log entries for traceability.
 
-Supported examples include:
+### Auto-generated docs
 
-- `10:00 AM`
-- `10am`
-- `08:00`
-- `0900`
-- `9.30`
-- `10.00`
+FastAPI provides interactive API documentation:
 
-## Intelligent Normalization Strategy
+- **Swagger UI:** http://localhost:8000/docs
+- **ReDoc:** http://localhost:8000/redoc
 
-Mall names are normalized through a production-oriented pipeline:
+---
 
-1. Cluster similar names into candidate groups.
-2. Support a review hook for LLM-based semantic validation.
-3. Persist approved mappings to `data/name_mappings.json`.
-4. Auto-apply known mappings on future ingestion runs.
-5. Surface unknown names for review in the Gradio admin tab.
+## Data Processing Pipeline
 
-This prevents hardcoded-name logic from becoming the only normalization mechanism.
+### Source Data
 
-## Chunking Strategy
+The provided `shops.csv` contains **12 shop records** across **3 Bangkok malls** (ICONSIAM, Siam Center, Siam Paragon). The data intentionally includes quality issues that the ingestion pipeline must handle:
 
-### Current dataset
+| Issue                     | Examples in the CSV                                  |
+|---------------------------|------------------------------------------------------|
+| Inconsistent mall names   | `"Icon Siam"`, `"icon-siam"`, `"ICONSIAM"`          |
+|                           | `"Siam Center"`, `"Siam-Center"`                    |
+|                           | `"Siam Paragon"`, `"SiamParagon"`                   |
+| Mixed time formats        | `"10:00 AM"`, `"10am"`, `"08:00"`, `"0900"`, `"9.30"`, `"10.00"` |
+| Varying capitalization    | Present across all text columns                      |
 
-The provided dataset is small, so the default strategy creates one summary chunk per shop.
+### Data Cleaning
 
-Example:
+The cleaner (`app/ingestion/cleaner.py`) addresses these issues systematically:
 
-```text
-Nike is a Sports shop located on floor 1 of ICONSIAM. Athletic footwear and apparel. Open from 10:00 to 22:00.
+1. **Schema validation** — Verifies all required columns are present: `mall_name`, `shop_name`, `category`, `floor`, `description`, `open_time`, `close_time`.
+2. **Whitespace normalization** — Strips leading/trailing whitespace and collapses internal runs on all text columns.
+3. **Missing value handling** — Fills empty `description` fields with `"No description available."` to ensure every chunk has readable text.
+4. **Time standardization** — Converts all time values to `HH:MM` 24-hour format. Supported input formats:
+
+   | Input      | Output  |
+   |------------|---------|
+   | `10:00 AM` | `10:00` |
+   | `10am`     | `10:00` |
+   | `8:00 PM`  | `20:00` |
+   | `08:00`    | `08:00` |
+   | `0900`     | `09:00` |
+   | `9.30`     | `09:30` |
+   | `10.00`    | `10:00` |
+
+### Intelligent Name Normalization
+
+Rather than hardcoding a name mapping (brittle, fails on unseen variants), the system uses a multi-stage normalization pipeline (`app/ingestion/normalizer.py`) designed to handle new data without code changes:
+
+**Stage 1 — Embedding-based clustering:**
+- Compute text similarity (Python `SequenceMatcher`) on normalized forms of each unique name (lowercased, alphanumeric only).
+- Optionally use cosine similarity on sentence-transformer embeddings for semantic matching.
+- Use a **Union-Find** algorithm to group names exceeding a configurable similarity threshold (default 0.75).
+- Example result: `{"ICONSIAM": ["Icon Siam", "icon-siam", "ICONSIAM"]}`
+
+**Stage 2 — Review hook:**
+- A `NameReviewer` protocol allows plugging in an LLM-based reviewer that validates cluster groupings and selects canonical names.
+- In automated mode (`--auto`), the default reviewer auto-approves all multi-variant clusters.
+
+**Stage 3 — Human review (Gradio UI):**
+- The Gradio admin panel ("Normalization Review" tab) displays suggested clusters.
+- Users can edit, approve, or reject groupings before applying them.
+- This provides a human-in-the-loop safety net for production data quality.
+
+**Stage 4 — Persistent mapping store:**
+- Approved mappings are saved to `data/name_mappings.json`.
+- On subsequent ingestion runs, known variants are auto-corrected from the stored mapping.
+- New, unknown names are flagged for another review cycle.
+- This creates a **self-improving** normalization system over time.
+
+### Chunking Strategy
+
+The chunker (`app/ingestion/chunker.py`) converts cleaned shop records into `ChunkDocument` objects ready for embedding and storage.
+
+**Current approach (small dataset):**
+
+Each shop row becomes **one self-contained natural-language chunk**:
+
+```
+Nike is a Sports shop located on floor 1 of ICONSIAM.
+Athletic footwear and apparel. Open from 10:00 to 22:00.
 ```
 
-### Production-ready extension path
+This is the `"single"` strategy — appropriate when each record is short enough to fit in a single embedding window without information loss.
 
-The chunker already supports a hierarchical mode:
+**Built-in hierarchical mode (for larger datasets):**
 
-- summary chunk for the shop overview
-- detail chunks for longer descriptions
-- overlapping token windows
-- parent-child chunk relationships
-- metadata preserved on every chunk
+The chunker also supports a `"hierarchical"` strategy with:
 
-This means the code can support longer descriptions later without replacing the retrieval design.
+- A **summary chunk** for the shop overview (always generated).
+- **Detail chunks** from longer descriptions using a sliding token window (`max_chunk_tokens`, `overlap_tokens`).
+- **Parent-child relationships** — detail chunks reference their parent summary chunk via `parent_chunk_id`.
+- Full metadata preserved on every chunk (mall name, floor, category, times).
 
-## Embedding Strategy
+Switching between strategies requires only changing the `CHUNK_STRATEGY` environment variable — no code changes needed.
 
-- Document embeddings use OpenAI `text-embedding-3-small`
-- Query embeddings use the same model for retrieval consistency
-- Local similarity grouping for normalization is kept separate from production retrieval embeddings
+**Metadata on every chunk:**
 
-## Guardrails Strategy
+Each `ChunkDocument` carries: `chunk_id`, `text`, `mall_name`, `shop_name`, `category`, `floor`, `open_time`, `close_time`, `chunk_type` ("summary" or "detail"), and `parent_chunk_id`.
 
-The system uses multiple guardrail layers instead of relying on a single prompt.
+### Embedding Strategy
 
-### Input guardrails
+- **Document and query embeddings** both use OpenAI `text-embedding-3-small` (1536 dimensions) to ensure retrieval consistency.
+- **Name normalization clustering** uses the local `sentence-transformers/all-MiniLM-L6-v2` model — this avoids API costs for internal preprocessing and keeps the normalization pipeline independent of the production embedding model.
+- Embeddings are generated in batch during ingestion and individually per query at request time.
 
-- moderation hook for harmful content screening
-- topical scope filtering for mall/shop-related requests
+---
 
-### Prompt guardrails
+## RAG Pipeline
 
-- grounded system prompt
-- explicit instruction not to invent missing facts
-- retrieved chunks injected directly into the prompt
+The end-to-end pipeline (`app/rag/pipeline.py`) orchestrates every step of the query flow:
 
-### Output guardrails
+```
+1. Input Guardrails  →  Block harmful or off-topic queries
+2. Embed Query       →  OpenAI text-embedding-3-small
+3. Retrieve          →  Qdrant semantic search (top-k, score threshold, metadata filters)
+4. No Sources?       →  Return "I don't have that information" fallback
+5. Build Prompt      →  System prompt + numbered source context + user question
+6. Generate          →  OpenAI gpt-4o-mini completion
+7. Output Guardrails →  Verify grounding + assess confidence
+8. Ungrounded?       →  Replace answer with safe fallback
+9. Return            →  Answer + sources + guardrail metadata
+```
 
-- grounding checks against retrieved metadata and chunk text
-- confidence scoring from retrieval scores
-- fallback response if the generated answer is not grounded
+### Retrieval
 
-### Source transparency
+The retrieval layer (`app/retrieval/vector_store.py`) wraps Qdrant with:
 
-Every response includes the source chunks used for answering, including metadata and retrieval scores.
+- **Semantic similarity search** using cosine distance on the query embedding.
+- **Metadata filtering** — optional field-level conditions (e.g., `mall_name = "ICONSIAM"`) are passed as Qdrant `Filter(must=[...])` expressions, combining vector similarity with exact-match constraints.
+- **Score threshold** — results below `RETRIEVAL_SCORE_THRESHOLD` (default 0.5) are discarded to avoid noise.
+- **Top-k** — returns up to `RETRIEVAL_TOP_K` results (default 5).
+
+Each result includes the full chunk text, metadata, and a relevance score.
+
+### Prompt Engineering
+
+The prompt system (`app/generation/prompts.py`) is designed to prevent hallucination and keep answers grounded:
+
+**System prompt:**
+
+```
+You are a helpful mall information assistant.
+Answer only using the provided retrieved context.
+Do not invent shop names, opening hours, categories, mall names, or floor information.
+If the answer is not contained in the retrieved context, say that you do not have that information.
+Be concise, accurate, and conversational.
+```
+
+**Context injection:**
+
+Retrieved chunks are formatted as numbered source blocks injected verbatim into the prompt:
+
+```
+[Source 1]
+Shop: Nike | Mall: ICONSIAM | Floor: 1 | Category: Sports
+Content: Nike is a Sports shop located on floor 1 of ICONSIAM.
+Athletic footwear and apparel. Open from 10:00 to 22:00.
+```
+
+**User prompt wrapper:**
+
+The user's question is wrapped with an explicit grounding instruction:
+
+```
+Based on the following context, answer the user's question.
+If the information is not in the context, say so.
+
+<context>
+{numbered source blocks}
+</context>
+
+Question: {user's query}
+```
+
+This layered approach — constitutional system prompt, verbatim context injection, and explicit grounding instructions — minimizes the chance of the LLM inventing facts.
+
+### Generation
+
+The LLM client (`app/generation/llm.py`) wraps OpenAI's Chat Completions API with:
+
+- **Configurable model** — defaults to `gpt-4o-mini` with `temperature=0.1` for deterministic, factual answers.
+- **Token limit** — `max_tokens=1024` (configurable via `LLM_MAX_TOKENS`).
+- **Retry logic** — up to 2 retries with a 1-second delay on transient API errors, preventing single-request failures from surfacing to users.
+
+### Guardrails
+
+The system uses **four layers of guardrails** instead of relying on a single prompt instruction:
+
+#### Layer 1 — Input guardrails (`app/guardrails/input_guard.py`)
+
+| Check                | Mechanism                                                                                                   |
+|----------------------|-------------------------------------------------------------------------------------------------------------|
+| Content moderation   | Pluggable `ModerationClient` protocol — slot for OpenAI Moderation API or custom provider                   |
+| Topical scope        | Keyword-based check against 23+ topic terms (`mall`, `shop`, `store`, `floor`, `category`, `hour`, `time`, `fashion`, `sports`, `beauty`, `electronics`, `cafe`, `supermarket`, etc.) |
+| Empty query          | Rejects blank input before processing                                                                       |
+
+Out-of-scope queries receive a polite redirect: _"I can only help with mall and shop related questions."_
+
+#### Layer 2 — Prompt-level guardrails
+
+- The system prompt explicitly instructs the LLM to answer only from provided context.
+- It instructs the LLM not to invent any shop names, hours, categories, malls, or floors.
+- Retrieved chunks are injected verbatim so the LLM has clear, unambiguous source material.
+
+#### Layer 3 — Output guardrails (`app/guardrails/output_guard.py`)
+
+| Check                  | How it works                                                                                     |
+|------------------------|--------------------------------------------------------------------------------------------------|
+| Time grounding         | Extracts all `HH:MM` patterns from the LLM answer and verifies each exists in source texts or metadata |
+| Floor grounding        | Extracts floor references and confirms they appear in the source data                            |
+| Entity grounding       | Checks that shop names and mall names from retrieved sources appear in the combined source text   |
+| Confidence scoring     | Based on the best retrieval score: **high** (≥ 0.85), **medium** (≥ 0.65), **low** (< 0.65)     |
+
+If grounding verification fails, the pipeline replaces the generated answer with a safe fallback: _"I do not have that information based on the retrieved context."_
+
+#### Layer 4 — Source transparency
+
+Every response includes the `sources` array and `guardrails` object, giving the consumer full visibility into:
+
+- Which data chunks were used to answer
+- How relevant each chunk was (score)
+- Whether the answer passed grounding checks
+- The confidence level of the retrieval
+
+---
+
+## Gradio UI
+
+The Gradio interface (`ui/gradio_app.py`) provides two tabs:
+
+### Chat Tab
+
+A web-based chat interface for asking questions about mall shops. It displays:
+
+- The AI-generated answer
+- Guardrail results (flagged, in-scope, grounding, confidence)
+- Full source chunks with metadata
+
+### Normalization Review Tab (Admin)
+
+An admin panel for reviewing and approving name normalization suggestions:
+
+1. Click "Generate Suggestions" to run the clustering pipeline on the current data.
+2. Review the suggested canonical-name → variant mappings.
+3. Edit if needed, then approve and apply.
+4. Approved mappings persist to `data/name_mappings.json` for future ingestion runs.
+
+Access the UI at **http://localhost:7860** after starting the services.
+
+---
 
 ## Testing
 
-Run the full test suite with:
+The project includes **47 unit tests** across 8 test modules, all using **pytest** with mocks and stubs (no external services required):
 
 ```bash
+# Run the full test suite
 pytest
+
+# Run with verbose output
+pytest -v
+
+# Run a specific test file
+pytest tests/test_pipeline.py
 ```
 
-Current test coverage includes:
+### Test coverage by module
 
-- cleaner
-- normalizer
-- chunker
-- vector store
-- generation
-- guardrails
-- pipeline
-- API
+| Test File              | Tests | What is covered                                                                          |
+|------------------------|-------|------------------------------------------------------------------------------------------|
+| `test_cleaner.py`      | 3     | Time normalization (10 parametrized format cases), data cleaning, missing column detection |
+| `test_normalizer.py`   | 5     | Name clustering, embedding similarity, external reviewer protocol, save/load round-trip, unknown name detection |
+| `test_chunker.py`      | 4     | Single-chunk strategy, hierarchical strategy, metadata preservation, metadata field correctness |
+| `test_vector_store.py` | 5+    | Embedding batch/query, Qdrant filter construction, collection CRUD, upsert, search results, point count, health check |
+| `test_generation.py`   | 4     | Context block building, message assembly, LLM completion, retry exhaustion handling       |
+| `test_guardrails.py`   | 5     | Flagged-content blocking, out-of-scope detection, valid-query pass-through, grounded-answer verification, unknown-time detection |
+| `test_pipeline.py`     | 4     | Out-of-scope blocking, no-sources fallback, grounded answer flow, ungrounded → fallback replacement |
+| `test_api.py`          | 3     | Chat endpoint response schema, health endpoint, X-Request-ID middleware propagation       |
 
-## Notes
+All tests mock external dependencies (OpenAI, Qdrant) and can run offline without any API keys.
 
-- The current Dockerfile uses a modern pinned Python slim base, but the image scanner may still report upstream OS-package vulnerabilities. That is a base-image supply concern rather than an application-code issue and should be addressed through routine image refreshing in CI.
-- The default runtime assumes a valid OpenAI API key and a reachable Qdrant instance.
+---
+
+## Configuration Reference
+
+All settings are managed via environment variables (or a `.env` file). The table below lists every variable with its default:
+
+| Variable                  | Default                    | Description                                                |
+|---------------------------|----------------------------|------------------------------------------------------------|
+| `OPENAI_API_KEY`          | _(required)_               | OpenAI API key for embeddings and generation               |
+| `QDRANT_HOST`             | `localhost`                | Qdrant server hostname                                     |
+| `QDRANT_PORT`             | `6333`                     | Qdrant HTTP API port                                       |
+| `QDRANT_COLLECTION_NAME`  | `mall_shops`               | Name of the Qdrant collection for shop vectors             |
+| `EMBEDDING_MODEL`         | `text-embedding-3-small`   | OpenAI embedding model                                     |
+| `EMBEDDING_DIMENSIONS`    | `1536`                     | Embedding vector dimensionality                            |
+| `LLM_MODEL`              | `gpt-4o-mini`              | OpenAI chat model for answer generation                    |
+| `LLM_TEMPERATURE`        | `0.1`                      | Generation temperature (lower = more deterministic)        |
+| `LLM_MAX_TOKENS`         | `1024`                     | Maximum tokens in generated response                       |
+| `RETRIEVAL_TOP_K`        | `5`                        | Maximum number of chunks to retrieve per query             |
+| `RETRIEVAL_SCORE_THRESHOLD` | `0.5`                   | Minimum cosine similarity score to include a result        |
+| `APP_HOST`               | `0.0.0.0`                  | API server bind address                                    |
+| `APP_PORT`               | `8000`                     | API server port                                            |
+| `LOG_LEVEL`              | `INFO`                     | Logging level (`DEBUG`, `INFO`, `WARNING`, `ERROR`)        |
+| `ENVIRONMENT`            | `development`              | Runtime environment (`development` or `production`)        |
+| `DATA_CSV_PATH`          | `data/shops.csv`           | Path to the source CSV file                                |
+| `NAME_MAPPINGS_PATH`     | `data/name_mappings.json`  | Path to the persisted normalization mappings                |
+| `CHUNK_STRATEGY`         | `single`                   | Chunking mode: `single` (one chunk per shop) or `hierarchical` (summary + detail windows) |
+| `CHUNK_MAX_TOKENS`       | `256`                      | Maximum tokens per detail chunk (hierarchical mode)        |
+| `CHUNK_OVERLAP_TOKENS`   | `50`                       | Overlap tokens between consecutive detail chunks           |
