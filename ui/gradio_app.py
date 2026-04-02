@@ -17,8 +17,10 @@ from app.ingestion.normalizer import (
     detect_unknown_names,
     flatten_mappings,
     load_name_mappings,
+    review_clusters,
     save_name_mappings,
 )
+from app.ingestion.openai_reviewer import OpenAINameReviewer
 
 settings = get_settings()
 DEFAULT_API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
@@ -50,10 +52,14 @@ def chat_with_api(message, history, api_base_url):
     )
 
     transcript = (
-        (history or "")
-        + f"User: {message}\nAssistant: {payload['answer']}\n\n"
+        history or ""
+    ) + f"User: {message}\nAssistant: {payload['answer']}\n\n"
+    return (
+        transcript,
+        payload["answer"],
+        json.dumps(payload["guardrails"], indent=2),
+        sources_markdown,
     )
-    return transcript, payload["answer"], json.dumps(payload["guardrails"], indent=2), sources_markdown
 
 
 def generate_normalization_suggestions():
@@ -63,14 +69,23 @@ def generate_normalization_suggestions():
     unique_names = sorted(cleaned_df["mall_name"].dropna().unique().tolist())
     unknown_names = detect_unknown_names(unique_names, existing_mappings)
     suggestions = cluster_names(unknown_names)
+    reviewer = (
+        OpenAINameReviewer(
+            api_key=settings.openai_api_key,
+            model=settings.normalization_review_model,
+        )
+        if settings.openai_api_key
+        else None
+    )
+    reviewed = review_clusters(suggestions, reviewer=reviewer)
 
     rows = []
-    for suggestion in suggestions:
+    for canonical_name, variants in reviewed.items():
         rows.append(
             {
                 "approved": True,
-                "canonical_name": suggestion.canonical_name,
-                "variants": ", ".join(suggestion.variants),
+                "canonical_name": canonical_name,
+                "variants": ", ".join(variants),
             }
         )
 
@@ -136,7 +151,9 @@ with gr.Blocks(title="Retail RAG Assistant") as demo:
         current_mappings = gr.Code(label="Current Mappings", language="json")
         refresh_button = gr.Button("Refresh Current Mappings")
 
-        generate_button.click(generate_normalization_suggestions, outputs=[suggestions_text])
+        generate_button.click(
+            generate_normalization_suggestions, outputs=[suggestions_text]
+        )
         apply_button.click(
             apply_approved_suggestions,
             inputs=[suggestions_text],

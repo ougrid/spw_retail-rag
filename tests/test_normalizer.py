@@ -1,5 +1,9 @@
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+
 import pandas as pd
 
+from app.ingestion.openai_reviewer import OpenAINameReviewer
 from app.ingestion.normalizer import (
     ClusterSuggestion,
     apply_name_mappings,
@@ -107,3 +111,37 @@ def test_detect_unknown_names_returns_unmapped_values():
     )
 
     assert unknown == ["Siam Paragon", "Siam-Center"]
+
+
+def test_openai_name_reviewer_parses_reviewed_clusters():
+    stub_client = MagicMock()
+    stub_client.chat.completions.create.return_value = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(
+                    content=(
+                        '{"clusters":[{"approved":true,"canonical_name":"ICONSIAM",'
+                        '"variants":["Icon Siam","icon-siam","ICONSIAM"]}]}'
+                    )
+                )
+            )
+        ]
+    )
+    reviewer = OpenAINameReviewer.__new__(OpenAINameReviewer)
+    reviewer._client = stub_client
+    reviewer._model = "gpt-4o-mini"
+    reviewer._max_retries = 0
+    reviewer._retry_delay_seconds = 0
+
+    reviewed = reviewer.review(
+        [
+            ClusterSuggestion(
+                canonical_name="Icon Siam",
+                variants=("ICONSIAM", "Icon Siam", "icon-siam"),
+            )
+        ]
+    )
+
+    assert reviewed == {
+        "ICONSIAM": ["Icon Siam", "icon-siam", "ICONSIAM"]
+    }

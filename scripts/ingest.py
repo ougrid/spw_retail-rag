@@ -20,6 +20,7 @@ from app.ingestion.normalizer import (
     review_clusters,
     save_name_mappings,
 )
+from app.ingestion.openai_reviewer import OpenAINameReviewer
 from app.retrieval.embeddings import EmbeddingClient
 from app.retrieval.vector_store import QdrantVectorStore
 
@@ -56,7 +57,15 @@ def build_normalized_dataframe(
 
     if unknown_names:
         suggestions = cluster_names(unknown_names)
-        reviewed = review_clusters(suggestions)
+        reviewer = (
+            OpenAINameReviewer(
+                api_key=settings.openai_api_key,
+                model=settings.normalization_review_model,
+            )
+            if settings.openai_api_key
+            else None
+        )
+        reviewed = review_clusters(suggestions, reviewer=reviewer)
         suggested_mappings = flatten_mappings(reviewed)
         merged_mappings = {**existing_mappings, **suggested_mappings}
         save_name_mappings(merged_mappings, settings.name_mappings_path)

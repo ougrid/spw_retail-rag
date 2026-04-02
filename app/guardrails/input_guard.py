@@ -35,6 +35,18 @@ TOPIC_KEYWORDS = {
     "supermarket",
 }
 
+THAI_SCOPE_KEYWORDS = {
+    "ร้าน",
+    "ห้าง",
+    "อยู่ที่ไหน",
+    "ที่ไหน",
+    "เปิด",
+    "ปิด",
+    "เวลา",
+    "ชั้น",
+    "ซื้อ",
+}
+
 
 @dataclass(frozen=True)
 class InputGuardResult:
@@ -83,4 +95,6 @@ class InputGuard:
 
     def _is_in_scope(self, query: str) -> bool:
         lowered = query.lower()
-        return any(keyword in lowered for keyword in TOPIC_KEYWORDS)
+        return any(keyword in lowered for keyword in TOPIC_KEYWORDS) or any(
+            keyword in query for keyword in THAI_SCOPE_KEYWORDS
+        )

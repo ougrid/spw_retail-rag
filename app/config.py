@@ -31,9 +31,18 @@ class Settings(BaseSettings):
     llm_temperature: float = 0.1
     llm_max_tokens: int = 1024
 
+    # Moderation
+    moderation_enabled: bool = True
+    moderation_model: str = "omni-moderation-latest"
+
+    # Normalization review
+    normalization_review_model: str = "gpt-4o-mini"
+
     # Retrieval
     retrieval_top_k: int = 5
     retrieval_score_threshold: float = 0.5
+    hybrid_candidate_multiplier: int = 4
+    hybrid_min_score: float = 0.2
 
     # Application
     app_host: str = "0.0.0.0"

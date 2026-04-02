@@ -123,9 +123,12 @@ def review_clusters(
 ) -> dict[str, list[str]]:
     """Review cluster suggestions and return canonical-to-variants mapping."""
     if reviewer is not None:
-        reviewed = reviewer.review(clusters)
-        logger.info("clusters_reviewed", reviewed_count=len(reviewed))
-        return reviewed
+        try:
+            reviewed = reviewer.review(clusters)
+            logger.info("clusters_reviewed", reviewed_count=len(reviewed))
+            return reviewed
+        except Exception as error:
+            logger.warning("clusters_review_failed", error=str(error))
 
     reviewed = {
         cluster.canonical_name: list(cluster.variants)

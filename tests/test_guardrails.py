@@ -1,4 +1,8 @@
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+
 from app.guardrails.input_guard import InputGuard
+from app.guardrails.openai_moderation import OpenAIModerationClient
 from app.guardrails.output_guard import OutputGuard
 from app.retrieval.vector_store import SearchResult
 
@@ -34,6 +38,15 @@ def test_input_guard_allows_shop_queries():
     guard = InputGuard()
 
     result = guard.evaluate("What sports shops are on floor 1?")
+
+    assert result.allowed is True
+    assert result.in_scope is True
+
+
+def test_input_guard_allows_thai_shop_queries():
+    guard = InputGuard()
+
+    result = guard.evaluate("ร้าน Nike อยู่ที่ไหน")
 
     assert result.allowed is True
     assert result.in_scope is True
@@ -95,3 +108,16 @@ def test_output_guard_returns_low_confidence_without_sources():
 
     assert result.grounding_verified is False
     assert result.confidence == "low"
+
+
+def test_openai_moderation_client_flags_blocked_input():
+    stub_client = MagicMock()
+    stub_client.moderations.create.return_value = SimpleNamespace(
+        results=[SimpleNamespace(flagged=True)]
+    )
+
+    client = OpenAIModerationClient.__new__(OpenAIModerationClient)
+    client._client = stub_client
+    client._model = "omni-moderation-latest"
+
+    assert client.moderate("harmful input") is True
