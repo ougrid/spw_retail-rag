@@ -2,10 +2,26 @@ from fastapi.testclient import TestClient
 
 from app.main import create_app
 from app.rag.pipeline import RAGResponse
+from app.session_memory import SessionMemoryStore
 
 
 class StubPipeline:
-    def answer(self, query: str, metadata_filters=None) -> RAGResponse:
+    def __init__(self) -> None:
+        self.calls = []
+
+    def answer(
+        self,
+        query: str,
+        metadata_filters=None,
+        conversation_history=None,
+    ) -> RAGResponse:
+        self.calls.append(
+            {
+                "query": query,
+                "metadata_filters": metadata_filters,
+                "conversation_history": list(conversation_history or []),
+            }
+        )
         return RAGResponse(
             answer="Nike is on floor 1 of ICONSIAM.",
             sources=[
@@ -38,8 +54,9 @@ class StubPipeline:
 
 
 def test_chat_endpoint_returns_answer_sources_and_guardrails():
+    pipeline = StubPipeline()
     app = create_app(
-        pipeline=StubPipeline(),
+        pipeline=pipeline,
         health_checks={"qdrant": lambda: True, "openai": lambda: True},
     )
     client = TestClient(app)
@@ -52,6 +69,33 @@ def test_chat_endpoint_returns_answer_sources_and_guardrails():
     assert body["sources"][0]["shop_name"] == "Nike"
     assert body["guardrails"]["grounding_verified"] is True
     assert body["retrieval_debug"]["inferred_filters"]["shop_name"] == "Nike"
+    assert body["session_id"]
+    assert pipeline.calls[0]["conversation_history"] == []
+
+
+def test_chat_endpoint_reuses_session_history_across_requests():
+    pipeline = StubPipeline()
+    app = create_app(
+        pipeline=pipeline,
+        health_checks={"qdrant": lambda: True, "openai": lambda: True},
+        session_store=SessionMemoryStore(),
+    )
+    client = TestClient(app)
+
+    first = client.post("/chat", json={"query": "อยากได้ชุดลำลอง"})
+    session_id = first.json()["session_id"]
+    second = client.post(
+        "/chat",
+        json={"query": "ต้องการ", "session_id": session_id},
+    )
+
+    assert second.status_code == 200
+    second_call_history = pipeline.calls[1]["conversation_history"]
+    assert len(second_call_history) == 2
+    assert second_call_history[0].role == "user"
+    assert second_call_history[0].content == "อยากได้ชุดลำลอง"
+    assert second_call_history[1].role == "assistant"
+    assert second.json()["session_id"] == session_id
 
 
 def test_health_endpoint_returns_status_and_checks():

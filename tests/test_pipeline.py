@@ -2,10 +2,15 @@ from app.guardrails.input_guard import InputGuard
 from app.guardrails.output_guard import OutputGuard
 from app.rag.pipeline import FALLBACK_ANSWER, RAGPipeline
 from app.retrieval.vector_store import SearchResult
+from app.session_memory import ConversationTurn
 
 
 class StubEmbeddingClient:
+    def __init__(self) -> None:
+        self.queries = []
+
     def embed_query(self, text: str) -> list[float]:
+        self.queries.append(text)
         return [0.1, 0.2]
 
 
@@ -18,10 +23,15 @@ class StubVectorStore:
 
 
 class StubLLMClient:
-    def __init__(self, answer: str):
+    def __init__(self, answer: str, rewrites=None):
         self.answer_text = answer
+        self.rewrites = list(rewrites or [])
+        self.calls = []
 
     def generate(self, messages):
+        self.calls.append(messages)
+        if self.rewrites:
+            return self.rewrites.pop(0)
         return self.answer_text
 
 
@@ -29,8 +39,10 @@ class StubRetriever:
     def __init__(self, sources, debug=None):
         self.sources = sources
         self.debug = debug or {"inferred_filters": {}, "candidates": []}
+        self.queries = []
 
     def retrieve(self, query, query_vector, explicit_filters=None):
+        self.queries.append(query)
         return type(
             "HybridResult",
             (),
@@ -119,3 +131,39 @@ def test_pipeline_replaces_ungrounded_answer_with_fallback():
 
     assert response.answer == FALLBACK_ANSWER
     assert response.guardrails["grounding_verified"] is False
+
+
+def test_pipeline_rewrites_short_follow_up_using_conversation_history():
+    embedding_client = StubEmbeddingClient()
+    llm_client = StubLLMClient(
+        answer="Zara is on floor 1 of Siam Center and is open from 10:00 to 22:00.",
+        rewrites=["How do I get to Zara in Siam Center?"],
+    )
+    retriever = StubRetriever(
+        [_sample_source()],
+        debug={"inferred_filters": {"shop_name": "Zara"}, "candidates": []},
+    )
+    pipeline = RAGPipeline(
+        embedding_client=embedding_client,
+        vector_store=StubVectorStore([_sample_source()]),
+        llm_client=llm_client,
+        input_guard=InputGuard(),
+        output_guard=OutputGuard(),
+        retriever=retriever,
+    )
+
+    response = pipeline.answer(
+        "ต้องการ",
+        conversation_history=[
+            ConversationTurn(role="user", content="โอเค ไป Zara"),
+            ConversationTurn(
+                role="assistant",
+                content="Zara ตั้งอยู่ที่ชั้น 1 ของ Siam Center ค่ะ คุณต้องการให้ฉันช่วยแนะนำเส้นทางไปที่นั่นไหม?",
+            ),
+        ],
+    )
+
+    assert embedding_client.queries[0] == "How do I get to Zara in Siam Center?"
+    assert retriever.queries[0] == "How do I get to Zara in Siam Center?"
+    assert response.answer == "Zara is on floor 1 of Siam Center and is open from 10:00 to 22:00."
+
