@@ -46,6 +46,7 @@ A production-ready Retrieval-Augmented Generation (RAG) chatbot that answers use
 	- [Testing](#testing)
 		- [Test coverage by module](#test-coverage-by-module)
 	- [Configuration Reference](#configuration-reference)
+	- [Future Improvements](#future-improvements)
 
 ---
 
@@ -761,4 +762,30 @@ All settings are managed via environment variables (or a `.env` file). The table
 | `NAME_MAPPINGS_PATH`     | `data/name_mappings.json`  | Path to the persisted normalization mappings                |
 | `CHUNK_STRATEGY`         | `single`                   | Chunking mode: `single` (one chunk per shop) or `hierarchical` (summary + detail windows) |
 | `CHUNK_MAX_TOKENS`       | `256`                      | Maximum tokens per detail chunk (hierarchical mode)        |
+
+---
+
+## Future Improvements
+
+The following enhancements would move this application closer to production readiness:
+
+1. **Persist session memory with Redis or a database.** The current in-memory session store is lost on process restart. Swapping to Redis (or a lightweight DB) would preserve conversation history across deployments and support horizontal scaling.
+
+2. **Per-user chat history with persistent storage.** Store full conversation logs per user so they can resume past sessions. This also enables analytics on common queries and failure patterns.
+
+3. **Streaming responses (Server-Sent Events).** Return LLM tokens incrementally via SSE so users see partial answers immediately instead of waiting for the full generation to complete.
+
+4. **Authentication and rate limiting.** Add API-key or OAuth-based authentication and per-client rate limits to prevent abuse and enable usage tracking.
+
+5. **Retrieval evaluation dataset and metrics.** Build a labeled query/answer dataset and compute retrieval metrics (MRR, Recall@K) and answer quality scores (faithfulness, relevance) to catch regressions before they reach users.
+
+6. **Response caching.** Cache frequent or identical queries (keyed by normalized query + retrieval fingerprint) to reduce latency and LLM costs.
+
+7. **CI/CD pipeline.** Automate linting, testing, Docker builds, and deployments on every push. Include the retrieval evaluation suite as a gate before merging.
+
+8. **Observability: metrics and tracing.** Export request latency, token usage, retrieval hit rates, and error counts to a monitoring stack (e.g. Prometheus/Grafana). Add distributed tracing (OpenTelemetry) to diagnose slow requests end-to-end.
+
+9. **Suggested follow-up questions.** After each answer, generate 2-3 contextual follow-up suggestions so users can explore related topics without crafting new queries.
+
+10. **User feedback collection.** Add thumbs-up/thumbs-down buttons to the UI and store ratings alongside the query/answer pair. This creates a feedback loop for improving prompts, retrieval, and evaluation datasets over time.
 | `CHUNK_OVERLAP_TOKENS`   | `50`                       | Overlap tokens between consecutive detail chunks           |
