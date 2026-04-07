@@ -95,9 +95,7 @@ def build_user_prompt(
         "If the context is insufficient, say so warmly and suggest what you can help with.\n\n"
     )
     if conversation_history:
-        prompt += (
-            f"Recent conversation:\n{build_conversation_block(conversation_history)}\n\n"
-        )
+        prompt += f"Recent conversation:\n{build_conversation_block(conversation_history)}\n\n"
     if resolved_query and resolved_query != query:
         prompt += f"Resolved user intent for retrieval: {resolved_query}\n\n"
         if _is_directions_request(resolved_query):
@@ -106,10 +104,7 @@ def build_user_prompt(
                 "Use the grounded mall and floor details from the retrieved context as the answer, "
                 "and do not ask again whether they want directions.\n\n"
             )
-    prompt += (
-        f"Retrieved context:\n{context_block}\n\n"
-        f"User question: {query}"
-    )
+    prompt += f"Retrieved context:\n{context_block}\n\n" f"User question: {query}"
     return prompt
 
 

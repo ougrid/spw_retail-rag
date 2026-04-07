@@ -89,7 +89,9 @@ def test_pipeline_returns_fallback_when_no_sources_are_found():
         llm_client=StubLLMClient("unused"),
         input_guard=InputGuard(),
         output_guard=OutputGuard(),
-        retriever=StubRetriever([], debug={"inferred_filters": {"mall_name": "ICONSIAM"}, "candidates": []}),
+        retriever=StubRetriever(
+            [], debug={"inferred_filters": {"mall_name": "ICONSIAM"}, "candidates": []}
+        ),
     )
 
     response = pipeline.answer("What sports shops are in ICONSIAM?")
@@ -106,7 +108,13 @@ def test_pipeline_returns_grounded_answer_with_sources():
         llm_client=StubLLMClient("Nike is on floor 1 of ICONSIAM and opens at 10:00."),
         input_guard=InputGuard(),
         output_guard=OutputGuard(),
-        retriever=StubRetriever([_sample_source()], debug={"inferred_filters": {"shop_name": "Nike"}, "candidates": [{"selected": True}]})
+        retriever=StubRetriever(
+            [_sample_source()],
+            debug={
+                "inferred_filters": {"shop_name": "Nike"},
+                "candidates": [{"selected": True}],
+            },
+        ),
     )
 
     response = pipeline.answer("Where is Nike in ICONSIAM?")
@@ -124,7 +132,13 @@ def test_pipeline_replaces_ungrounded_answer_with_fallback():
         llm_client=StubLLMClient("Nike opens at 09:00."),
         input_guard=InputGuard(),
         output_guard=OutputGuard(),
-        retriever=StubRetriever([_sample_source()], debug={"inferred_filters": {"shop_name": "Nike"}, "candidates": [{"selected": True}]})
+        retriever=StubRetriever(
+            [_sample_source()],
+            debug={
+                "inferred_filters": {"shop_name": "Nike"},
+                "candidates": [{"selected": True}],
+            },
+        ),
     )
 
     response = pipeline.answer("What time does Nike open?")
@@ -165,5 +179,7 @@ def test_pipeline_rewrites_short_follow_up_using_conversation_history():
 
     assert embedding_client.queries[0] == "How do I get to Zara in Siam Center?"
     assert retriever.queries[0] == "How do I get to Zara in Siam Center?"
-    assert response.answer == "Zara is on floor 1 of Siam Center and is open from 10:00 to 22:00."
-
+    assert (
+        response.answer
+        == "Zara is on floor 1 of Siam Center and is open from 10:00 to 22:00."
+    )
