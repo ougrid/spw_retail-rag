@@ -96,6 +96,19 @@ def generate_normalization_suggestions():
             }
         )
 
+    if not rows:
+        return json.dumps(
+            {
+                "message": (
+                    "No unknown mall-name variants found — every name in "
+                    f"{settings.data_csv_path} is already mapped in "
+                    f"{settings.name_mappings_path}."
+                )
+            },
+            indent=2,
+            ensure_ascii=False,
+        )
+
     return json.dumps(rows, indent=2)
 
 
@@ -104,7 +117,7 @@ def apply_approved_suggestions(suggestions_text):
         return "No suggestions to apply."
 
     suggestions = json.loads(suggestions_text)
-    if not suggestions:
+    if not suggestions or not isinstance(suggestions, list):
         return "No suggestions to apply."
 
     canonical_to_variants: dict[str, list[str]] = {}
@@ -173,6 +186,44 @@ with gr.Blocks(title="Retail RAG Assistant") as demo:
         )
 
     with gr.Tab("Normalization Review"):
+        with gr.Accordion(
+            "Example: what this looks like when unknown names are found", open=False
+        ):
+            gr.Markdown(
+                """
+If `data/shops.csv` contains mall-name spellings that aren't yet in
+`data/name_mappings.json` — say a new row uses `"Central World"` and
+`"CentralWorld"` — clicking **Generate Suggestions** would cluster them
+and show something like this instead of the "no unknown names" message:
+
+```json
+[
+  {
+    "approved": true,
+    "canonical_name": "CentralWorld",
+    "variants": "Central World, CentralWorld"
+  }
+]
+```
+
+**What each field means:**
+- `approved` — set to `false` to skip a suggestion you disagree with; only
+  `true` rows get saved.
+- `canonical_name` — the standardized name that will be used going forward.
+  Edit this directly in the box if the suggested spelling isn't right.
+- `variants` — the comma-separated raw spellings from the CSV that should
+  map to `canonical_name`. Add or remove entries as needed.
+
+**How to apply suggestions:**
+1. Click **Generate Suggestions** to detect and cluster any unmapped names.
+2. Review the JSON in the box above — edit `canonical_name`/`variants`
+   directly, or flip `approved` to `false` to reject a row.
+3. Click **Apply Approved Suggestions** to save the approved rows into
+   `data/name_mappings.json`. Rejected or edited-out rows are skipped.
+4. Click **Refresh Current Mappings** below to confirm what was saved.
+                """
+            )
+
         suggestions_text = gr.Code(label="Generated Suggestions", language="json")
         generate_button = gr.Button("Generate Suggestions")
         apply_button = gr.Button("Apply Approved Suggestions")
