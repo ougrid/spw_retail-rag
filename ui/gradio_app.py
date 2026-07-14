@@ -139,13 +139,14 @@ with gr.Blocks(title="Retail RAG Assistant") as demo:
         api_base_url = gr.Textbox(label="API Base URL", value=DEFAULT_API_BASE_URL)
         session_id = gr.State(str(uuid4()))
         message = gr.Textbox(label="Your question")
+        with gr.Row():
+            send_button = gr.Button("Send")
+            new_session_button = gr.Button("New Session")
         transcript = gr.Textbox(label="Conversation", lines=12)
         answer_box = gr.Textbox(label="Latest Answer", lines=4)
         guardrails_json = gr.Code(label="Guardrails", language="json")
         sources_markdown = gr.Markdown(label="Sources")
         retrieval_debug_json = gr.Code(label="Retrieval Debug", language="json")
-        send_button = gr.Button("Send")
-        new_session_button = gr.Button("New Session")
 
         send_button.click(
             chat_with_api,
