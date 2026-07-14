@@ -2,13 +2,23 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from app.guardrails.input_guard import (
+    CATEGORY_MESSAGES,
     InputGuard,
+    LLMIntentClassifier,
     OUT_OF_SCOPE_MESSAGE,
     PROHIBITED_ITEM_MESSAGE,
 )
 from app.guardrails.openai_moderation import OpenAIModerationClient
 from app.guardrails.output_guard import OutputGuard
 from app.retrieval.vector_store import SearchResult
+
+
+class StubIntentClassifier:
+    def __init__(self, category: str):
+        self.category = category
+
+    def classify_intent(self, query: str) -> str:
+        return self.category
 
 
 class StubModerationClient:
@@ -58,11 +68,7 @@ def test_input_guard_allows_thai_shopping_intent():
 
 
 def test_input_guard_llm_fallback_allows_ambiguous_in_scope_query():
-    class StubIntentClassifier:
-        def classify_intent(self, query: str) -> bool:
-            return True
-
-    guard = InputGuard(intent_classifier=StubIntentClassifier())
+    guard = InputGuard(intent_classifier=StubIntentClassifier("shopping"))
 
     # No keyword match, but LLM says in-scope
     result = guard.evaluate("มีอะไรน่าสนใจบ้าง")
@@ -72,16 +78,62 @@ def test_input_guard_llm_fallback_allows_ambiguous_in_scope_query():
 
 
 def test_input_guard_llm_fallback_rejects_off_topic_query():
-    class StubIntentClassifier:
-        def classify_intent(self, query: str) -> bool:
-            return False
-
-    guard = InputGuard(intent_classifier=StubIntentClassifier())
+    guard = InputGuard(intent_classifier=StubIntentClassifier("general_knowledge"))
 
     result = guard.evaluate("What is the meaning of life?")
 
     assert result.allowed is False
     assert result.in_scope is False
+    assert result.reason == CATEGORY_MESSAGES["general_knowledge"]
+
+
+def test_input_guard_llm_classifies_small_talk_with_tailored_message():
+    guard = InputGuard(intent_classifier=StubIntentClassifier("small_talk"))
+
+    result = guard.evaluate("Hi, do you know my name?")
+
+    assert result.allowed is False
+    assert result.flagged is False
+    assert result.reason == CATEGORY_MESSAGES["small_talk"]
+
+
+def test_input_guard_llm_classifies_emotional_support_with_tailored_message():
+    guard = InputGuard(intent_classifier=StubIntentClassifier("emotional_support"))
+
+    result = guard.evaluate("Can you comfort me? I'm feeling lonely")
+
+    assert result.allowed is False
+    assert result.flagged is False
+    assert result.reason == CATEGORY_MESSAGES["emotional_support"]
+
+
+def test_input_guard_llm_classifies_prohibited_item_as_flagged():
+    guard = InputGuard(intent_classifier=StubIntentClassifier("prohibited_item"))
+
+    result = guard.evaluate("Something to hurt someone with")
+
+    assert result.allowed is False
+    assert result.flagged is True
+    assert result.reason == PROHIBITED_ITEM_MESSAGE
+
+
+def test_input_guard_llm_falls_back_to_generic_message_for_unknown_category():
+    guard = InputGuard(intent_classifier=StubIntentClassifier("other"))
+
+    result = guard.evaluate("asdkfjasldkfj")
+
+    assert result.allowed is False
+    assert result.reason == OUT_OF_SCOPE_MESSAGE
+
+
+def test_llm_intent_classifier_fails_open_to_shopping_on_error():
+    class BrokenLLMClient:
+        def generate(self, messages):
+            raise RuntimeError("API down")
+
+    classifier = LLMIntentClassifier(BrokenLLMClient())
+
+    assert classifier.classify_intent("anything") == "shopping"
 
 
 def test_input_guard_blocks_weapon_request_despite_shopping_keywords():

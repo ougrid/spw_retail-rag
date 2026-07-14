@@ -657,14 +657,15 @@ The system uses **four layers of guardrails** instead of relying on a single pro
 
 #### Layer 1 — Input guardrails (`app/guardrails/input_guard.py`)
 
-| Check                | Mechanism                                                                                                   |
-|----------------------|-------------------------------------------------------------------------------------------------------------|
-| Content moderation   | Real OpenAI moderation via `omni-moderation-latest` with a pluggable client seam for other providers       |
-| Scope fast-pass      | Expanded English and Thai shopping-intent keywords catch obvious in-scope queries for free                  |
-| Scope fallback       | A lightweight `gpt-4o-mini` intent classifier runs only when keywords miss to catch indirect or multilingual retail intent |
-| Empty query          | Rejects blank input before processing                                                                       |
+| Check                    | Mechanism                                                                                                   |
+|--------------------------|---------------------------------------------------------------------------------------------------------------|
+| Content moderation       | Real OpenAI moderation via `omni-moderation-latest` with a pluggable client seam for other providers          |
+| Prohibited-item deny-list| A weapons/ammunition/explosives keyword deny-list runs before shopping-intent keywords, so generic words like "buy" or "want" can't wave through a request for a restricted item |
+| Scope fast-pass          | Expanded English and Thai shopping-intent keywords catch obvious in-scope queries for free                    |
+| Scope classification     | A `gpt-4o-mini` intent classifier runs only when keywords miss, returning a category (`shopping`, `prohibited_item`, `small_talk`, `emotional_support`, `general_knowledge`, `other`) rather than a plain yes/no |
+| Empty query              | Rejects blank input before processing                                                                         |
 
-The scope guard now uses a tiered strategy rather than a keyword-only gate. Obvious requests such as `Where can I buy shoes?`, `I want a T-shirt`, and `อยากได้ชุดลำลองใส่ไปเที่ยว` pass immediately through the keyword fast-path, while ambiguous queries can still be rescued by the LLM intent classifier. Truly off-topic questions receive a warm concierge redirect instead of a blunt rejection.
+The scope guard uses a tiered strategy rather than a keyword-only gate. Obvious requests such as `Where can I buy shoes?`, `I want a T-shirt`, and `อยากได้ชุดลำลองใส่ไปเที่ยว` pass immediately through the keyword fast-path, while ambiguous queries fall through to the LLM classifier. Each off-topic category gets its own tailored concierge redirect (e.g. small talk gets a friendly nudge back to shopping; requests for emotional support get an empathetic decline) instead of one generic canned response for every rejection reason. On classifier failure, the guard fails open to `shopping` — prioritizing availability over strictness — see [Future Improvements](#future-improvements) for hardening this further.
 
 #### Layer 2 — Prompt-level guardrails
 
@@ -820,4 +821,10 @@ The following enhancements would move this application closer to production read
 9. **Suggested follow-up questions.** After each answer, generate 2-3 contextual follow-up suggestions so users can explore related topics without crafting new queries.
 
 10. **User feedback collection.** Add thumbs-up/thumbs-down buttons to the UI and store ratings alongside the query/answer pair. This creates a feedback loop for improving prompts, retrieval, and evaluation datasets over time.
+
+11. **Data-driven, config-based scope classification.** The input guard's `TOPIC_KEYWORDS`, `THAI_SCOPE_KEYWORDS`, and `PROHIBITED_ITEM_KEYWORDS` are hardcoded Python sets — adding a new language, category, or slang term requires a code change. The LLM intent classifier (`app/guardrails/input_guard.py`) now returns a scope *category* with a tailored redirect message per category (`small_talk`, `emotional_support`, `general_knowledge`, `prohibited_item`), which is a meaningful step up from a single generic canned response, but on classifier failure it still fails open to `"shopping"` (prioritizing availability over strictness). Further hardening would include:
+    - Moving keyword/category lists to a config or data file so new categories don't require code changes.
+    - Failing closed (or to a neutral retry) instead of fail-open when the classifier errors, once latency/cost of always calling the classifier is acceptable.
+    - A labeled scope-evaluation dataset (mirroring `test_query_evaluations.py`) covering borderline and adversarial cases — including multi-turn scope drift across a conversation — to catch regressions in CI.
+    - Logging low-confidence or borderline classifications for periodic human review, closing the loop the same way the name-normalization review pipeline already does.
 | `CHUNK_OVERLAP_TOKENS`   | `50`                       | Overlap tokens between consecutive detail chunks           |

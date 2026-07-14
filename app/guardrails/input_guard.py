@@ -145,16 +145,46 @@ OUT_OF_SCOPE_MESSAGE = (
     "about what you're looking for?"
 )
 
+# ── Tailored redirects per off-topic category, keyed to the LLM's ───
+# classification below (falls back to OUT_OF_SCOPE_MESSAGE for anything
+# not in this map, e.g. an "other" category or an unrecognized value)
+CATEGORY_MESSAGES = {
+    "small_talk": (
+        "Happy to chat! I'm your shopping mall concierge, though — I can help "
+        "you find shops, check opening hours, or suggest stores by category. "
+        "What are you in the mood to shop for?"
+    ),
+    "emotional_support": (
+        "I'm sorry you're feeling that way. I'm not able to offer emotional "
+        "support, but I'm here if you'd like help finding a shop, checking "
+        "hours, or picking out something nice — want a few suggestions?"
+    ),
+    "general_knowledge": (
+        "That's outside what I can help with — I'm your shopping mall "
+        "concierge, so I can't answer general knowledge questions. I can "
+        "help you find shops, check hours, or suggest stores by category "
+        "instead."
+    ),
+    "prohibited_item": PROHIBITED_ITEM_MESSAGE,
+}
+
 INTENT_CLASSIFICATION_PROMPT = """\
-You are a scope classifier for a shopping-mall concierge chatbot.
-Decide whether the user's message is related to shopping, retail, malls, stores, \
-products, brands, services you'd find in a shopping centre, or asking for product \
+You are an intent classifier for a shopping-mall concierge chatbot.
+Classify the user's message into exactly one category:
+- "shopping": related to shopping, retail, malls, stores, products, brands, \
+services you'd find in a shopping centre, or asking for product \
 recommendations / where to buy something.
-Requests for weapons, ammunition, explosives, or other illegal/dangerous items are \
-NOT in scope even when phrased as a shopping request.
+- "prohibited_item": asking to buy or find weapons, ammunition, explosives, \
+drugs, or other illegal/dangerous items, even when phrased as a shopping request.
+- "small_talk": greetings, chit-chat, jokes, or asking about the bot itself.
+- "emotional_support": asking for comfort, venting, or expressing loneliness, \
+sadness, or distress.
+- "general_knowledge": factual, trivia, news, or political questions unrelated \
+to shopping.
+- "other": anything else not related to shopping.
 
 Reply with ONLY a JSON object — no markdown fences, no extra text:
-{"in_scope": true} or {"in_scope": false}
+{"category": "shopping"}
 """.strip()
 
 
@@ -172,19 +202,20 @@ class ModerationClient(Protocol):
 
 
 class IntentClassifier(Protocol):
-    """Lightweight LLM call that returns structured scope classification."""
+    """Lightweight LLM call that returns a structured scope category."""
 
-    def classify_intent(self, query: str) -> bool:
-        """Return True when the query is in-scope for the mall chatbot."""
+    def classify_intent(self, query: str) -> str:
+        """Return one of: shopping, prohibited_item, small_talk,
+        emotional_support, general_knowledge, other."""
 
 
 class LLMIntentClassifier:
-    """Use an LLM to classify whether a query is in-scope."""
+    """Use an LLM to classify the user's message into a scope category."""
 
     def __init__(self, llm_client: Any) -> None:
         self._llm = llm_client
 
-    def classify_intent(self, query: str) -> bool:
+    def classify_intent(self, query: str) -> str:
         messages = [
             {"role": "system", "content": INTENT_CLASSIFICATION_PROMPT},
             {"role": "user", "content": query},
@@ -192,13 +223,13 @@ class LLMIntentClassifier:
         try:
             raw = self._llm.generate(messages)
             result = json.loads(raw)
-            in_scope = result.get("in_scope", False)
-            logger.info("llm_intent_classified", query=query, in_scope=in_scope)
-            return bool(in_scope)
+            category = str(result.get("category", "other")).strip().lower()
+            logger.info("llm_intent_classified", query=query, category=category)
+            return category
         except Exception as exc:
             logger.warning("llm_intent_classification_failed", error=str(exc))
             # Fail-open: let ambiguous queries through to retrieval
-            return True
+            return "shopping"
 
 
 class InputGuard:
@@ -242,12 +273,20 @@ class InputGuard:
 
         # Tier 2: LLM intent classification (only when keywords miss)
         if self._intent_classifier is not None:
-            in_scope = self._intent_classifier.classify_intent(normalized_query)
-            if in_scope:
+            category = self._intent_classifier.classify_intent(normalized_query)
+            if category == "shopping":
                 logger.info("input_guard_llm_pass", query=normalized_query)
                 return InputGuardResult(True, False, True, "ok")
 
-        # Not in scope — return soft redirect
+            logger.info(
+                "input_guard_llm_reject", query=normalized_query, category=category
+            )
+            message = CATEGORY_MESSAGES.get(category, OUT_OF_SCOPE_MESSAGE)
+            return InputGuardResult(
+                False, category == "prohibited_item", False, message
+            )
+
+        # Not in scope — return soft redirect (no classifier configured)
         logger.info("input_guard_out_of_scope", query=normalized_query)
         return InputGuardResult(False, False, False, OUT_OF_SCOPE_MESSAGE)
 
