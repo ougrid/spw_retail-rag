@@ -68,6 +68,41 @@ TOPIC_KEYWORDS = {
     "jewelry",
 }
 
+# ── Tier-0 prohibited-item deny-list (checked before the generic ────
+# shopping-intent keywords below, so "buy"/"want" can't wave through a
+# request for a weapon or explosive)
+PROHIBITED_ITEM_KEYWORDS = {
+    "gun",
+    "guns",
+    "firearm",
+    "firearms",
+    "rifle",
+    "pistol",
+    "handgun",
+    "shotgun",
+    "ammo",
+    "ammunition",
+    "bullet",
+    "bullets",
+    "weapon",
+    "weapons",
+    "explosive",
+    "explosives",
+    "bomb",
+    "bombs",
+    "grenade",
+    "ปืน",
+    "อาวุธ",
+    "ระเบิด",
+    "กระสุน",
+}
+
+PROHIBITED_ITEM_MESSAGE = (
+    "I can't help with weapons, ammunition, or explosives. I can help you find "
+    "shops, check opening hours, or suggest stores by category — what would "
+    "you like to know?"
+)
+
 THAI_SCOPE_KEYWORDS = {
     # location / mall
     "ร้าน",
@@ -115,6 +150,8 @@ You are a scope classifier for a shopping-mall concierge chatbot.
 Decide whether the user's message is related to shopping, retail, malls, stores, \
 products, brands, services you'd find in a shopping centre, or asking for product \
 recommendations / where to buy something.
+Requests for weapons, ammunition, explosives, or other illegal/dangerous items are \
+NOT in scope even when phrased as a shopping request.
 
 Reply with ONLY a JSON object — no markdown fences, no extra text:
 {"in_scope": true} or {"in_scope": false}
@@ -192,6 +229,12 @@ class InputGuard:
                 False, True, False, "Query was flagged by content moderation."
             )
 
+        # Tier 0: Prohibited-item deny-list (checked before shopping-intent
+        # keywords so "buy"/"want" can't wave through a weapons request)
+        if self._prohibited_item_match(normalized_query):
+            logger.warning("input_guard_prohibited_item", query=normalized_query)
+            return InputGuardResult(False, True, False, PROHIBITED_ITEM_MESSAGE)
+
         # Tier 1: Keyword fast-pass (free)
         if self._keyword_match(normalized_query):
             logger.info("input_guard_keyword_pass", query=normalized_query)
@@ -212,4 +255,10 @@ class InputGuard:
         lowered = query.lower()
         return any(keyword in lowered for keyword in TOPIC_KEYWORDS) or any(
             keyword in query for keyword in THAI_SCOPE_KEYWORDS
+        )
+
+    def _prohibited_item_match(self, query: str) -> bool:
+        lowered = query.lower()
+        return any(keyword in lowered for keyword in PROHIBITED_ITEM_KEYWORDS) or any(
+            keyword in query for keyword in PROHIBITED_ITEM_KEYWORDS
         )

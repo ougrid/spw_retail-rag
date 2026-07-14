@@ -1,7 +1,11 @@
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from app.guardrails.input_guard import InputGuard, OUT_OF_SCOPE_MESSAGE
+from app.guardrails.input_guard import (
+    InputGuard,
+    OUT_OF_SCOPE_MESSAGE,
+    PROHIBITED_ITEM_MESSAGE,
+)
 from app.guardrails.openai_moderation import OpenAIModerationClient
 from app.guardrails.output_guard import OutputGuard
 from app.retrieval.vector_store import SearchResult
@@ -78,6 +82,27 @@ def test_input_guard_llm_fallback_rejects_off_topic_query():
 
     assert result.allowed is False
     assert result.in_scope is False
+
+
+def test_input_guard_blocks_weapon_request_despite_shopping_keywords():
+    guard = InputGuard()
+
+    result = guard.evaluate("I want to buy a gun")
+
+    assert result.allowed is False
+    assert result.flagged is True
+    assert result.in_scope is False
+    assert result.reason == PROHIBITED_ITEM_MESSAGE
+
+
+def test_input_guard_blocks_thai_weapon_request():
+    guard = InputGuard()
+
+    result = guard.evaluate("อยากได้ปืน")
+
+    assert result.allowed is False
+    assert result.flagged is True
+    assert result.reason == PROHIBITED_ITEM_MESSAGE
 
 
 def test_input_guard_allows_shop_queries():

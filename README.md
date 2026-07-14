@@ -7,46 +7,47 @@ A production-ready Retrieval-Augmented Generation (RAG) chatbot that answers use
 ## Table of Contents
 
 - [Retail RAG Chatbot](#retail-rag-chatbot)
-	- [Table of Contents](#table-of-contents)
-	- [Architecture Overview](#architecture-overview)
-	- [Tech Stack](#tech-stack)
-		- [Why Qdrant over alternatives](#why-qdrant-over-alternatives)
-	- [Project Structure](#project-structure)
-	- [Setup Instructions](#setup-instructions)
-		- [Prerequisites](#prerequisites)
-		- [API Key Configuration](#api-key-configuration)
-		- [Local Development Setup](#local-development-setup)
-		- [Docker Setup (Recommended)](#docker-setup-recommended)
-	- [Running the Application](#running-the-application)
-		- [Quick smoke test](#quick-smoke-test)
-		- [Ingestion script flags](#ingestion-script-flags)
-	- [API Reference](#api-reference)
-		- [`POST /chat` — Ask a question](#post-chat--ask-a-question)
-		- [`GET /health` — Service health check](#get-health--service-health-check)
-		- [Request tracking](#request-tracking)
-		- [Auto-generated docs](#auto-generated-docs)
-	- [Data Processing Pipeline](#data-processing-pipeline)
-		- [Source Data](#source-data)
-		- [Data Cleaning](#data-cleaning)
-		- [Intelligent Name Normalization](#intelligent-name-normalization)
-		- [Chunking Strategy](#chunking-strategy)
-		- [Embedding Strategy](#embedding-strategy)
-	- [RAG Pipeline](#rag-pipeline)
-		- [Retrieval](#retrieval)
-		- [Prompt Engineering](#prompt-engineering)
-		- [Generation](#generation)
-		- [Guardrails](#guardrails)
-			- [Layer 1 — Input guardrails (`app/guardrails/input_guard.py`)](#layer-1--input-guardrails-appguardrailsinput_guardpy)
-			- [Layer 2 — Prompt-level guardrails](#layer-2--prompt-level-guardrails)
-			- [Layer 3 — Output guardrails (`app/guardrails/output_guard.py`)](#layer-3--output-guardrails-appguardrailsoutput_guardpy)
-			- [Layer 4 — Source transparency](#layer-4--source-transparency)
-	- [Gradio UI](#gradio-ui)
-		- [Chat Tab](#chat-tab)
-		- [Normalization Review Tab (Admin)](#normalization-review-tab-admin)
-	- [Testing](#testing)
-		- [Test coverage by module](#test-coverage-by-module)
-	- [Configuration Reference](#configuration-reference)
-	- [Future Improvements](#future-improvements)
+  - [Table of Contents](#table-of-contents)
+  - [Architecture Overview](#architecture-overview)
+  - [Tech Stack](#tech-stack)
+    - [Why Qdrant over alternatives](#why-qdrant-over-alternatives)
+  - [Project Structure](#project-structure)
+  - [Setup Instructions](#setup-instructions)
+    - [Prerequisites](#prerequisites)
+    - [API Key Configuration](#api-key-configuration)
+    - [Local Development Setup](#local-development-setup)
+    - [Docker Setup (Recommended)](#docker-setup-recommended)
+  - [Running the Application](#running-the-application)
+    - [Quick smoke test](#quick-smoke-test)
+    - [Ingestion script flags](#ingestion-script-flags)
+    - [Troubleshooting](#troubleshooting)
+  - [API Reference](#api-reference)
+    - [`POST /chat` — Ask a question](#post-chat--ask-a-question)
+    - [`GET /health` — Service health check](#get-health--service-health-check)
+    - [Request tracking](#request-tracking)
+    - [Auto-generated docs](#auto-generated-docs)
+  - [Data Processing Pipeline](#data-processing-pipeline)
+    - [Source Data](#source-data)
+    - [Data Cleaning](#data-cleaning)
+    - [Intelligent Name Normalization](#intelligent-name-normalization)
+    - [Chunking Strategy](#chunking-strategy)
+    - [Embedding Strategy](#embedding-strategy)
+  - [RAG Pipeline](#rag-pipeline)
+    - [Retrieval](#retrieval)
+    - [Prompt Engineering](#prompt-engineering)
+    - [Generation](#generation)
+    - [Guardrails](#guardrails)
+      - [Layer 1 — Input guardrails (`app/guardrails/input_guard.py`)](#layer-1--input-guardrails-appguardrailsinput_guardpy)
+      - [Layer 2 — Prompt-level guardrails](#layer-2--prompt-level-guardrails)
+      - [Layer 3 — Output guardrails (`app/guardrails/output_guard.py`)](#layer-3--output-guardrails-appguardrailsoutput_guardpy)
+      - [Layer 4 — Source transparency](#layer-4--source-transparency)
+  - [Gradio UI](#gradio-ui)
+    - [Chat Tab](#chat-tab)
+    - [Normalization Review Tab (Admin)](#normalization-review-tab-admin)
+  - [Testing](#testing)
+    - [Test coverage by module](#test-coverage-by-module)
+  - [Configuration Reference](#configuration-reference)
+  - [Future Improvements](#future-improvements)
 
 ---
 
@@ -224,17 +225,17 @@ cp .env.example .env
 # 4. Start Qdrant (requires Docker)
 docker run -d -p 6333:6333 -p 6334:6334 qdrant/qdrant:v1.17.1
 
-# 5. Run data ingestion
-python scripts/ingest.py --auto --recreate
+# 5. Run data ingestion (run as a module, not a bare script — see Troubleshooting)
+python -m scripts.ingest --auto --recreate
 
 # 6. Start the API server
 uvicorn app.main:app --reload
 
 # 7. (Optional) Start the Gradio UI in a separate terminal
-python ui/gradio_app.py
+python -m ui.gradio_app
 ```
 
-The API will be available at `http://localhost:8000` and the Gradio UI at `http://localhost:7860`.
+The API will be available at `http://localhost:8000` and the Gradio UI at `http://localhost:7860` (open `localhost`, not the `0.0.0.0` printed in the launch log — see Troubleshooting).
 
 ### Docker Setup (Recommended)
 
@@ -301,6 +302,37 @@ curl -X POST http://localhost:8000/chat \
 | `--recreate`  | Drop and recreate the Qdrant collection before upserting               |
 
 Without `--auto`, the script prints unknown name clusters as JSON for manual review before proceeding.
+
+### Troubleshooting
+
+**`ModuleNotFoundError: No module named 'app'` when running `scripts/ingest.py` or `ui/gradio_app.py`**
+
+Run these as modules from the project root instead of as bare scripts:
+
+```bash
+python -m scripts.ingest --auto --recreate
+python -m ui.gradio_app
+```
+
+Invoking `python path/to/file.py` only puts that file's own directory on `sys.path`, so the top-level `app` package can't be found. The `-m` form runs from the repo root, which is on `sys.path`, so `app` resolves correctly.
+
+**Gradio shows `ERR_ADDRESS_INVALID` at `http://0.0.0.0:7860/`**
+
+The Gradio launch log prints `Running on local URL: http://0.0.0.0:7860` because the server binds to `0.0.0.0` (all network interfaces) so it also works inside Docker. `0.0.0.0` itself isn't a browsable address — open **http://localhost:7860** or **http://127.0.0.1:7860** instead.
+
+**`ImportError: DLL load failed ... An Application Control policy has blocked this file` when importing numpy (Windows)**
+
+This is a Windows Application Control policy (WDAC/AppLocker/endpoint security) blocking numpy's native binary, most often seen when the virtual environment was created with a very new Python version (e.g. 3.14) whose wheels aren't yet recognized by the policy. Recreate `.venv` with a more established Python version instead:
+
+```bash
+# install Python 3.12 if not already present
+winget install --id Python.Python.3.12 -e
+
+# recreate the venv with it
+py -3.12 -m venv .venv
+source .venv/Scripts/activate   # Windows Git Bash
+pip install -r requirements.txt
+```
 
 ---
 
