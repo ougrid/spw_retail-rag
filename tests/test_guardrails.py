@@ -5,6 +5,7 @@ from app.guardrails.input_guard import (
     CATEGORY_MESSAGES,
     InputGuard,
     LLMIntentClassifier,
+    MODERATION_BLOCKED_MESSAGE,
     OUT_OF_SCOPE_MESSAGE,
     PROHIBITED_ITEM_MESSAGE,
 )
@@ -36,7 +37,7 @@ def test_input_guard_blocks_flagged_queries():
 
     assert result.allowed is False
     assert result.flagged is True
-    assert result.reason == "Query was flagged by content moderation."
+    assert result.reason == MODERATION_BLOCKED_MESSAGE
 
 
 def test_input_guard_blocks_out_of_scope_queries():

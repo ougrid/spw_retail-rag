@@ -103,6 +103,12 @@ PROHIBITED_ITEM_MESSAGE = (
     "you like to know?"
 )
 
+MODERATION_BLOCKED_MESSAGE = (
+    "Let's keep things friendly! I'm your shopping mall concierge, so I can't "
+    "respond to that — but I'm happy to help you find shops, check opening "
+    "hours, or suggest stores by category. What would you like to know?"
+)
+
 THAI_SCOPE_KEYWORDS = {
     # location / mall
     "ร้าน",
@@ -256,9 +262,7 @@ class InputGuard:
         )
         if flagged:
             logger.warning("input_guard_flagged", query=normalized_query)
-            return InputGuardResult(
-                False, True, False, "Query was flagged by content moderation."
-            )
+            return InputGuardResult(False, True, False, MODERATION_BLOCKED_MESSAGE)
 
         # Tier 0: Prohibited-item deny-list (checked before shopping-intent
         # keywords so "buy"/"want" can't wave through a weapons request)
